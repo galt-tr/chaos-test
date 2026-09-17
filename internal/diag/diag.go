@@ -69,7 +69,10 @@ const (
 	ClassBehind         = "behind"
 	ClassUnhealthy      = "unhealthy"
 	ClassInSync         = "in_sync"
-	ClassUnknown        = "unknown"
+	// ClassNotApplicable: the node has no teranode asset API (an SV node); only container
+	// state and tip are probed and the teranode rules are not evaluated.
+	ClassNotApplicable = "not_applicable"
+	ClassUnknown       = "unknown"
 )
 
 // Verdict is the computed explanation. Evidence and Missing make a verdict derived from

@@ -3,6 +3,7 @@ package diag
 import (
 	"context"
 	"errors"
+	"fmt"
 	"net"
 	"strings"
 	"sync"
@@ -56,6 +57,43 @@ func New(d Deps) *Service {
 		}
 	}
 	return s
+}
+
+// probeNonTeranode fills the container state and the tip (via the kind-aware fleet lookup)
+// for a node without a teranode asset API and returns an informational verdict.
+func (s *Service) probeNonTeranode(ctx context.Context, n topology.Node, d *Diagnostics, start time.Time) *Diagnostics {
+	c, cancel := context.WithTimeout(ctx, probeTimeout)
+	defer cancel()
+	t := time.Now()
+	st, err := s.d.Runtime.State(c, n.Container)
+	src := SourceStatus{Name: SrcContainer, OK: err == nil, Elapsed: time.Since(t).Round(time.Millisecond).String()}
+	if err != nil {
+		src.Error, src.Reason = err.Error(), classify(err)
+	} else {
+		d.ContainerState = st
+	}
+	d.Sources = append(d.Sources, src)
+	t = time.Now()
+	h, err := s.d.Fleet.Tip(c, n.Name)
+	src = SourceStatus{Name: SrcTip, OK: err == nil, Elapsed: time.Since(t).Round(time.Millisecond).String()}
+	if err != nil {
+		src.Error, src.Reason = err.Error(), classify(err)
+	} else {
+		d.Tip = &TipInfo{Height: h.Height, Hash: h.Hash}
+	}
+	d.Sources = append(d.Sources, src)
+	d.Degraded = err != nil
+	d.FetchedAt = time.Now().UTC().Format(time.RFC3339Nano)
+	d.Elapsed = time.Since(start).Round(time.Millisecond).String()
+	d.Verdict = Verdict{
+		Class: ClassNotApplicable, Severity: "info", Confidence: "high",
+		Headline: fmt.Sprintf("%s is an SV node: teranode diagnostics do not apply", n.Name),
+		Details: []string{
+			"SV Node has no asset API, FSM, catch-up state or service heights; only its container state and tip (over RPC) are probed here.",
+			"See the Fleet page for its legacy peers, mempool and the alert sidecar's sequence and unprocessed count.",
+		},
+	}
+	return d
 }
 
 // Report diagnoses one node, or every node when node is empty.
@@ -133,6 +171,11 @@ func (s *Service) probe(ctx context.Context, n topology.Node, fc FleetContext, p
 
 	d := &Diagnostics{Node: n.Name, Container: n.Container}
 	asset := s.d.Fleet.Asset(n.Name)
+	if asset == nil {
+		// An SV node: no asset API, FSM, catch-up or service heights to inspect. Report what
+		// exists (container, tip over RPC) and say so instead of evaluating teranode rules.
+		return s.probeNonTeranode(ctx, n, d, start)
+	}
 
 	var mu sync.Mutex
 	status := map[string]SourceStatus{}
