@@ -1,7 +1,8 @@
 import { useMemo, useState, type ReactNode } from 'react';
 import type { Event, NodeState, Snapshot } from '../api';
 import { useLiveCtx } from '../live';
-import { EVENT_KINDS, ago, fmtTime, hashColor } from '../hooks';
+import { EVENT_KINDS, ago, fmtTime, hashColor, useActions } from '../hooks';
+import { NodeControls, type ActionProps } from '../nodeactions';
 import { Empty, Hash, JsonTree, Linkify, Pill, Tip, TxList } from '../ui';
 
 /** For rejected-tx verdicts the `hash` field is a txid. */
@@ -9,6 +10,8 @@ const REJECTED_TX_KEYS = new Set(['hash']);
 
 export function FleetPage() {
   const { snapshot, events, connected } = useLiveCtx();
+  // Must precede the !snapshot early return below, or the hook order changes between renders.
+  const { status, run } = useActions();
   if (!snapshot) {
     return (
       <div className="panel">
@@ -21,7 +24,7 @@ export function FleetPage() {
     <>
       <Consensus snap={snapshot} />
       <div className="grid nodes">
-        {snapshot.nodes.map((n) => <NodeCard key={n.name} n={n} />)}
+        {snapshot.nodes.map((n) => <NodeCard key={n.name} n={n} status={status} run={run} />)}
         <HubCard snap={snapshot} />
         <ArcadeCard snap={snapshot} />
         <ServicesCard snap={snapshot} />
@@ -66,7 +69,7 @@ function Consensus({ snap }: { snap: Snapshot }) {
   );
 }
 
-function NodeCard({ n }: { n: NodeState }) {
+function NodeCard({ n, status, run }: ActionProps) {
   const seq = n.alertSeq < 0 ? 'n/a' : `#${n.alertSeq}`;
   return (
     <div className={`panel node ${n.reachable ? '' : 'down'}`}>
@@ -75,6 +78,10 @@ function NodeCard({ n }: { n: NodeState }) {
         <span className="row">
           {n.partitions?.map((p) => <Pill key={p} ok={false} title={`${p} plane disconnected`}>{p} plane cut</Pill>)}
           <Pill ok={n.reachable}>{n.reachable ? 'reachable' : 'unreachable'}</Pill>
+          {n.hostURL && (
+            <a className="btn" href={n.hostURL} target="_blank" rel="noreferrer"
+              title={`open ${n.name}'s asset dashboard in a new tab`}>open ↗</a>
+          )}
         </span>
       </div>
       <dl className="kv">
@@ -92,6 +99,7 @@ function NodeCard({ n }: { n: NodeState }) {
         <dt>container</dt><dd><code>{n.container}</code></dd>
         <dt>updated</dt><dd className="muted">{ago(n.updatedAt)} ago</dd>
       </dl>
+      <NodeControls n={n} status={status} run={run} />
       {n.error && <div className="error small" title={n.error}>{n.error}</div>}
     </div>
   );

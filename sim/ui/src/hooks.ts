@@ -108,6 +108,36 @@ export function useTick(ms = 1000) {
 }
 
 /** Hash-based route: `#/fleet` → "fleet". Defaults to "fleet". */
+/**
+ * Query parameters carried in the hash, e.g. `#/logs?a=teranode1&b=teranode2`.
+ *
+ * useRoute deliberately keeps only the first path segment, so anything after `?` never
+ * reaches it. Pages that want deep links (the Diagnostics page links into Logs with
+ * filters preselected) read them here instead.
+ */
+export function useHashParams(): URLSearchParams {
+  const read = () => new URLSearchParams(window.location.hash.replace(/^#\/?[^?]*\??/, ''));
+  const [p, setP] = useState(read);
+  useEffect(() => {
+    const f = () => setP(read());
+    window.addEventListener('hashchange', f);
+    return () => window.removeEventListener('hashchange', f);
+  }, []);
+  return p;
+}
+
+/** Whether the tab is visible. Polling pauses when it is not, so a forgotten tab does not
+ *  keep reading container logs all afternoon. */
+export function useVisible(): boolean {
+  const [vis, setVis] = useState(() => !document.hidden);
+  useEffect(() => {
+    const f = () => setVis(!document.hidden);
+    document.addEventListener('visibilitychange', f);
+    return () => document.removeEventListener('visibilitychange', f);
+  }, []);
+  return vis;
+}
+
 export function useRoute(fallback = 'fleet') {
   const read = () => {
     const h = window.location.hash.replace(/^#\/?/, '');

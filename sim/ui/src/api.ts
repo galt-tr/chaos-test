@@ -2,6 +2,8 @@ export type NodeState = {
   name: string; index: number; reachable: boolean; height: number; tip: string; fsm: string;
   mempoolCount: number; mempool?: string[]; alertSeq: number; alertReachable: boolean; version?: string;
   container: string; partitions?: string[]; error?: string; updatedAt: string;
+  /** The node's own asset dashboard, reachable from the browser (static config). */
+  hostURL?: string;
 };
 export type ArcadeDatahub = { url: string; node?: string; source?: string; healthy: boolean };
 export type ArcadeState = {
@@ -38,6 +40,89 @@ export type ScenarioStep = { name: string; action: string; with?: Record<string,
 export type Scenario = { id: string; name: string; description: string; requires?: string[]; roles: Record<string, string>; params: Record<string, unknown>; steps: ScenarioStep[] | null; source?: string };
 export type KeyEntry = { name: string; address: string; note?: string; lockingScript?: string; privateKeyHex?: string };
 
+
+// ---- logs ---------------------------------------------------------------------------------
+
+/** One parsed container log line. `cont` holds the continuation lines of a wrapped error. */
+export type LogLine = {
+  seq: number; at: string; logAt?: string; level: string; service?: string; source?: string;
+  msg: string; cont?: string[]; continuation?: boolean;
+  rootCause?: string; code?: string; codeNum?: number; raw?: string;
+};
+
+/** One fetch of a node's log. `levels`/`services` count the window BEFORE filtering, so the
+ *  UI can show what the current filter is hiding. */
+export type LogPage = {
+  node: string; container: string; runtime: string;
+  lines: LogLine[]; nextCursor: string;
+  reset: boolean; resetReason?: string;
+  scanned: number; matched: number; dropped: number; truncated: boolean;
+  levels: Record<string, number>; services: Record<string, number>;
+  fetchedAt: string; elapsed: string;
+};
+
+export type LogQuery = {
+  node: string; cursor?: string; since?: string; tail?: number; limit?: number;
+  level?: string; service?: string; grep?: string; regex?: boolean; caseSensitive?: boolean;
+};
+
+// ---- diagnostics --------------------------------------------------------------------------
+
+export type SourceStatus = { name: string; ok: boolean; error?: string; reason?: string; httpStatus?: number; elapsed: string };
+export type FSMInfo = { state: string; stateValue: number; legalEvents?: string[] };
+export type PreviousAttempt = {
+  peer_id: string; peer_url: string; target_block_hash: string; target_block_height: number;
+  error_message: string; error_type: string; attempt_time: number; duration_ms: number;
+  blocks_validated: number; peerNode?: string;
+};
+export type CatchupStatus = {
+  is_catching_up: boolean; peer_id: string; peer_url: string;
+  target_block_hash: string; target_block_height: number; current_height: number;
+  total_blocks: number; blocks_fetched: number; blocks_validated: number;
+  fork_depth: number; common_ancestor_hash: string; common_ancestor_height: number;
+  start_time: number; duration_ms: number;
+  previous_attempt?: PreviousAttempt; peerNode?: string;
+};
+export type DiagPeer = {
+  id: string; client_name: string; transport?: string; height: number; block_hash: string;
+  data_hub_url?: string; is_connected: boolean; is_banned: boolean; ban_score: number;
+  connected_at?: number; catchup_attempts?: number; catchup_successes?: number; catchup_failures?: number;
+  catchup_reputation_score?: number; catchup_avg_response_ms?: number;
+  last_catchup_error?: string; last_catchup_error_time?: number; node?: string;
+};
+export type InvalidBlock = {
+  height: number; hash: string; previousblockhash: string; miner: string; timestamp: string;
+  transactionCount: number; size: number; coinbaseValue: number;
+  minerNode?: string; rejectReason?: string; rejectRootCause?: string; rejectCode?: string;
+};
+export type HealthDep = { resource: string; status: number; error?: string; message?: string; seenIn?: string[]; ok: boolean };
+export type HealthInfo = { overallStatus: number; parsed: boolean; raw?: string; services: number; checks: number; deps: HealthDep[]; unhealthy: string[] };
+export type LogHint = { services?: string; level?: string; grep?: string };
+export type Verdict = {
+  class: string; severity: string; headline: string;
+  details?: string[]; evidence?: string[]; missing?: string[]; confidence: string;
+  suggest?: string[]; logHint?: LogHint;
+};
+/** A null section means UNKNOWN, not "nothing wrong" — check `sources` for why. */
+export type Diagnostics = {
+  node: string; container: string; containerState?: string; fetchedAt: string; elapsed: string;
+  sources: SourceStatus[]; degraded: boolean;
+  tip?: { height: number; hash: string };
+  fsm?: FSMInfo; catchup?: CatchupStatus; peers?: DiagPeer[];
+  heights?: { block_assembly_height: number | null; block_persister_height: number | null };
+  invalidBlocks?: InvalidBlock[]; health?: HealthInfo;
+  verdict: Verdict;
+};
+export type FleetNodeBrief = { name: string; height: number; tip: string; reachable: boolean; fsm: string; partitions?: string[] };
+export type FleetContext = {
+  maxHeight: number; majorityTip: string; majorityTipHeight: number; majorityCount: number;
+  nodes: Record<string, FleetNodeBrief>; snapshotAt: string;
+};
+export type DiagReport = { nodes: Diagnostics[]; fleet: FleetContext; fetchedAt: string; cached: boolean; elapsed: string };
+
+/** Error bodies carry a machine-readable `reason`; branch on it, never on the message. */
+export type ApiFailure = { error: string; reason?: string; runtime?: string; container?: string };
+
 async function req<T>(method: string, path: string, body?: unknown): Promise<T> {
   const r = await fetch(path, { method, headers: body ? { 'Content-Type': 'application/json' } : undefined, body: body ? JSON.stringify(body) : undefined });
   const text = await r.text();
@@ -72,4 +157,23 @@ export const api = {
   run: (id: string) => req<Run>('GET', `/api/runs/${id}`),
   runNext: (id: string) => req('POST', `/api/runs/${id}/next`),
   runAbort: (id: string) => req('POST', `/api/runs/${id}/abort`),
+  logs: (q: LogQuery) => {
+    const p = new URLSearchParams({ node: q.node });
+    if (q.cursor) p.set('cursor', q.cursor);
+    else if (q.since) p.set('since', q.since);
+    else p.set('tail', String(q.tail ?? 500));
+    if (q.limit) p.set('limit', String(q.limit));
+    if (q.level) p.set('level', q.level);
+    if (q.service) p.set('service', q.service);
+    if (q.grep) p.set('grep', q.grep);
+    if (q.regex) p.set('regex', '1');
+    if (q.caseSensitive) p.set('case', '1');
+    return req<LogPage>('GET', `/api/logs?${p}`);
+  },
+  diagnostics: (node?: string, refresh = false) => {
+    const p = new URLSearchParams();
+    if (node) p.set('node', node);
+    if (refresh) p.set('refresh', '1');
+    return req<DiagReport>('GET', `/api/diagnostics?${p}`);
+  },
 };

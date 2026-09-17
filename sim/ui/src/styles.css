@@ -113,3 +113,40 @@ a.btn { display:inline-block; background:#21262d; border:1px solid #30363d; bord
 a.btn:hover { border-color:var(--accent); }
 .json pre a, .evdata a, .assert a, .finding a { color:var(--accent); }
 .links { display:flex; gap:10px; flex-wrap:wrap; font-size:12px; margin-top:8px; }
+
+/* ---- logs page ---------------------------------------------------------------------- */
+/* Fixed height, not max-height: two panes must line up row-for-row, and with max-height the
+   pane holding fewer lines is shorter, which breaks the comparison the page exists for. */
+.logs { height: calc(100vh - 330px); min-height: 260px; overflow: auto; overscroll-behavior: contain; background:#0d1117; border-radius:6px; }
+@media (max-width: 1000px) { .logs { height: 42vh; } }
+.logpane { display: flex; flex-direction: column; min-width: 0; }
+.lg { display: grid; grid-template-columns: 92px 46px 60px 1fr; gap: 6px; padding: 1px 4px;
+      font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 12px; line-height: 1.35; cursor: pointer; }
+.lg:hover { background: #1b1f28; }
+.lg .t, .lg .s { color: var(--muted); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.lg .l { font-weight: 600; }
+/* The global `pre` rule is pre-wrap + break-all, which rewraps log lines mid-token and
+   destroys the column alignment. A log line is pre-formatted: never wrap, never break. */
+.lg .m { min-width: 0; white-space: pre; overflow: hidden; text-overflow: ellipsis; }
+.lg.open .m, .logs.wrapped .lg .m { white-space: pre-wrap; overflow-wrap: anywhere; overflow: visible; }
+.lg .evdata { grid-column: 1 / -1; background: #11161f; padding: 6px 8px; border-radius: 6px; white-space: pre-wrap; margin: 2px 0; }
+/* Severity is never colour-alone: a left bar and the level text carry it too. */
+.lv-debug { opacity: .72; } .lv-debug .l { color: #6e7681; }
+.lv-info .l { color: var(--muted); }
+.lv-warn .l { color: var(--warn); } .lv-warn { border-left: 2px solid var(--warn); padding-left: 2px; }
+.lv-error .l { color: var(--bad); } .lv-error { border-left: 2px solid var(--bad); padding-left: 2px; }
+.lv-fatal .l { color: var(--bad); } .lv-fatal { border-left: 2px solid var(--bad); padding-left: 2px; background: #2a1315; }
+.lv-raw .l { color: #d2a8ff; } .lv-raw { border-left: 2px solid #d2a8ff; padding-left: 2px; } .lv-raw .m { white-space: pre-wrap; }
+.lggap { color: var(--muted); font-size: 11px; text-align: center; padding: 1px 0; opacity: .7; }
+code.code { color: var(--bad); background: #3d1418; border-radius: 4px; padding: 0 4px; font-size: 11.5px; }
+.chainlink { color: var(--muted); } .chainlink.root { color: var(--fg); }
+
+/* ---- diagnostics page --------------------------------------------------------------- */
+/* Dependency-free progress bar: track, <i> fill sized inline, <b> label over the top. */
+.bar { position: relative; height: 16px; background: #0d1117; border: 1px solid var(--line); border-radius: 4px; margin: 3px 0; overflow: hidden; }
+.bar i { display: block; height: 100%; background: #1f6feb; transition: width .3s; }
+.bar.val i { background: #238636; }
+.bar b { position: absolute; inset: 0; text-align: center; font-size: 11px; line-height: 14px; font-weight: 400; }
+tr.off td { opacity: .55; }
+.srcs { display: flex; gap: 6px; flex-wrap: wrap; }
+.verdict { font-size: 14px; }

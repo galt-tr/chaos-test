@@ -7,6 +7,8 @@ import { AlertsPage } from './pages/Alerts';
 import { ChainPage } from './pages/Chain';
 import { ChaosPage } from './pages/Chaos';
 import { ScenariosPage } from './pages/Scenarios';
+import { LogsPage } from './pages/Logs';
+import { DiagnosticsPage } from './pages/Diagnostics';
 
 const ROUTES: { id: string; label: string; page: () => JSX.Element }[] = [
   { id: 'fleet', label: 'Fleet', page: FleetPage },
@@ -14,6 +16,8 @@ const ROUTES: { id: string; label: string; page: () => JSX.Element }[] = [
   { id: 'chain', label: 'Chain & UTXOs', page: ChainPage },
   { id: 'chaos', label: 'Chaos', page: ChaosPage },
   { id: 'scenarios', label: 'Scenarios', page: ScenariosPage },
+  { id: 'logs', label: 'Logs', page: LogsPage },
+  { id: 'diag', label: 'Diagnostics', page: DiagnosticsPage },
 ];
 
 export function App() {
