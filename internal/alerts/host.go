@@ -153,12 +153,28 @@ func (hh *Host) Connect(ctx context.Context, addr string) (peer.ID, error) {
 	return info.ID, nil
 }
 
-// Probe returns the peer's latest alert sequence.
-func (hh *Host) Probe(ctx context.Context, addr string) (uint32, error) {
+// deadline is the host timeout, or the caller's context deadline when that is sooner.
+func (hh *Host) deadline(ctx context.Context) time.Time {
+	dl := time.Now().Add(hh.timeout)
+	if d, ok := ctx.Deadline(); ok && d.Before(dl) {
+		dl = d
+	}
+	return dl
+}
+
+// Probe returns the peer's latest alert sequence. A failed probe closes the connection to the
+// peer so the next one dials afresh: a connection that has gone dead (the peer was cut from the
+// network) would otherwise be reused and keep the peer looking reachable.
+func (hh *Host) Probe(ctx context.Context, addr string) (seq uint32, err error) {
 	pid, err := hh.Connect(ctx, addr)
 	if err != nil {
 		return 0, err
 	}
+	defer func() {
+		if err != nil {
+			_ = hh.h.Network().ClosePeer(pid)
+		}
+	}()
 	ctx, cancel := context.WithTimeout(ctx, hh.timeout)
 	defer cancel()
 	s, err := hh.h.NewStream(ctx, pid, hh.proto)
@@ -166,7 +182,7 @@ func (hh *Host) Probe(ctx context.Context, addr string) (uint32, error) {
 		return 0, fmt.Errorf("open stream to %s: %w", pid, err)
 	}
 	defer s.Close()
-	_ = s.SetDeadline(time.Now().Add(hh.timeout))
+	_ = s.SetDeadline(hh.deadline(ctx))
 	if err := writeFrame(s, &asp2p.SyncMessage{Type: asp2p.IWantLatest}); err != nil {
 		return 0, err
 	}
@@ -207,7 +223,7 @@ func (hh *Host) Push(ctx context.Context, addr string, upTo uint32) (*PushResult
 		return nil, fmt.Errorf("open stream to %s: %w", pid, err)
 	}
 	defer s.Close()
-	_ = s.SetDeadline(time.Now().Add(hh.timeout))
+	_ = s.SetDeadline(hh.deadline(ctx))
 
 	if err := writeFrame(s, &asp2p.SyncMessage{Type: asp2p.IGotLatest, SequenceNumber: upTo, Data: wire}); err != nil {
 		return nil, err

@@ -165,16 +165,11 @@ func toInt(v any) (int64, bool) {
 	return 0, false
 }
 
-// liveTip fetches a node's best header from its asset API.
+// liveTip fetches a node's best header live (asset API on teranodes, RPC on SV nodes).
 func (x *executor) liveTip(ref string) (*teranode.BlockHeader, error) {
-	node := x.node(ref)
-	asset := x.e.d.Fleet.Asset(node)
-	if asset == nil {
-		return nil, fmt.Errorf("unknown node %q", node)
-	}
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
-	return asset.BestBlockHeader(ctx)
+	return x.e.d.Fleet.Tip(ctx, x.node(ref))
 }
 
 // node maps a role or node name to a node name.
@@ -349,17 +344,11 @@ func (x *executor) action(ctx context.Context, name string, w map[string]any) (a
 		}
 		return map[string]any{"node": node, "hashes": hashes, "count": len(hashes), "last": last}, nil
 	case "coinbase":
-		node := x.node(str(w, "node"))
-		b, err := x.e.d.Fleet.Asset(node).BlockByHeight(ctx, uint32(num(w, "height", 1)))
+		cb, err := a.Coinbase(ctx, x.node(str(w, "node")), uint32(num(w, "height", 1)))
 		if err != nil {
 			return nil, err
 		}
-		var cb struct {
-			TxID string `json:"txid"`
-			Hex  string `json:"hex"`
-		}
-		_ = jsonUnmarshal(b.CoinbaseTx, &cb)
-		return map[string]any{"txid": cb.TxID, "hex": cb.Hex, "height": b.Height, "block": b.Hash}, nil
+		return map[string]any{"txid": cb.TxID, "hex": cb.Hex, "height": cb.Height, "block": cb.Hash}, nil
 	case "newkey":
 		e, err := a.NewKey(str(w, "name"), str(w, "note"))
 		if err != nil {
@@ -426,7 +415,19 @@ func (x *executor) action(ctx context.Context, name string, w map[string]any) (a
 			s := uint64(num(w, "stop", 0))
 			stopP = &s
 		}
-		err := x.e.d.Fleet.RPC(node).Freeze(ctx, str(w, "txid"), uint32(num(w, "vout", 0)), startP, stopP, boolean(w, "policyExpires"))
+		var err error
+		if sv := x.e.d.Fleet.SV(node); sv != nil {
+			f := alerts.Fund{TxID: str(w, "txid"), Vout: uint32(num(w, "vout", 0)), PolicyExpiresWithConsensus: boolean(w, "policyExpires")}
+			if startP != nil {
+				f.EnforceAtHeightStart = *startP
+			}
+			if stopP != nil {
+				f.EnforceAtHeightStop = *stopP
+			}
+			err = sv.AddToConsensusBlacklist(ctx, []alerts.Fund{f})
+		} else {
+			err = x.e.d.Fleet.RPC(node).Freeze(ctx, str(w, "txid"), uint32(num(w, "vout", 0)), startP, stopP, boolean(w, "policyExpires"))
+		}
 		if err == nil {
 			x.e.d.Fleet.Watch(str(w, "txid"), uint32(num(w, "vout", 0)), "rpc freeze")
 		}

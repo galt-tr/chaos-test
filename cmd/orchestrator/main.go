@@ -141,6 +141,9 @@ func run(ctx context.Context, lg *slog.Logger, invPath, keysPath, dataDir, liste
 	if kafka != "" && !hostMode {
 		var topics []teranode.VerdictTopic
 		for _, n := range inv.Nodes {
+			if n.KafkaRejectedTx == "" || n.KafkaInvalidBlocks == "" {
+				continue // SV nodes publish no verdict topics
+			}
 			topics = append(topics, teranode.VerdictTopic{Topic: n.KafkaRejectedTx, Node: n.Name, Kind: "rejected_tx"},
 				teranode.VerdictTopic{Topic: n.KafkaInvalidBlocks, Node: n.Name, Kind: "invalid_block"})
 		}
