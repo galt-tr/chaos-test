@@ -35,3 +35,25 @@ func TestUseHostURLs(t *testing.T) {
 		t.Fatalf("kafka must be untouched")
 	}
 }
+
+func TestNodeLookupSkipsSVIndex(t *testing.T) {
+	inv := &Inventory{Nodes: []Node{
+		{Kind: "teranode", Name: "teranode1", Index: 1},
+		{Kind: "teranode", Name: "teranode2", Index: 2},
+		{Kind: "svnode", Name: "svnode1", Index: 1, Sidecar: &Sidecar{APIURL: "http://10.191.0.31:3000", HostAPI: "http://localhost:40300"}},
+	}}
+	n, err := inv.Node("1")
+	if err != nil || n.Name != "teranode1" {
+		t.Fatalf("index 1 must be teranode1, got %v %v", n, err)
+	}
+	if n, err := inv.Node("svnode1"); err != nil || !n.IsSV() {
+		t.Fatalf("svnode1 by name: %v %v", n, err)
+	}
+	if len(inv.Teranodes()) != 2 || len(inv.SVNodes()) != 1 {
+		t.Fatalf("kind filters: %d teranodes, %d sv", len(inv.Teranodes()), len(inv.SVNodes()))
+	}
+	inv.UseHostURLs()
+	if inv.Nodes[2].Sidecar.APIURL != "http://localhost:40300" {
+		t.Fatalf("sidecar URL not rewritten: %s", inv.Nodes[2].Sidecar.APIURL)
+	}
+}

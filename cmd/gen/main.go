@@ -1,12 +1,15 @@
-// gen renders the standalone stack for N teranodes: compose.yaml, per-node env files, the
-// alert hub config, keys.json (created once, then reused) and inventory.json.
+// gen renders the standalone stack for N teranodes and SV SV nodes: compose.yaml, per-node
+// env files and bitcoin.conf files, the alert hub and sidecar configs, keys.json (created
+// once, then reused) and inventory.json.
 //
-//	go run ./cmd/gen -n 3 -out stack
+//	go run ./cmd/gen -n 3 -sv 2 -out stack
 //
-// Addressing (all pinned): chaosnet 10.190.0.0/24 (kafka .5, teranodeN .10+N, arcade .40,
-// merkle .41, wallet .42), alertnet 192.0.0.128/26 (gw .129, hub .130, teranodeN .140+N,
-// tools .180, orchestrator .181), ctlnet 10.191.0.0/24 (teranodeN .10+N, hub .30, arcade .40,
-// merkle .41, wallet .42, tools .50, orchestrator .51). Host ports: 20000+(N-1)*2000+(port-8000).
+// Addressing (all pinned): chaosnet 10.190.0.0/24 (kafka .5, teranodeN .10+N, svnodeJ .20+J,
+// arcade .40, merkle .41, wallet .42), alertnet 192.0.0.128/26 (gw .129, hub .130, teranodeN
+// .140+N, alert-svnodeJ .150+J, tools .180, orchestrator .181), ctlnet 10.191.0.0/24 (teranodeN
+// .10+N, svnodeJ .20+J, hub .30, alert-svnodeJ .30+J, arcade .40, merkle .41, wallet .42, tools
+// .50, orchestrator .51). Host ports: teranodes 20000+(N-1)*2000+(port-8000); SV nodes
+// 40000+(J-1)*1000 (+332 RPC, +300 sidecar API).
 package main
 
 import (
@@ -46,7 +49,8 @@ type KeysFile struct {
 	Publisher     keys.Ed25519Identity `json:"publisher"`
 	Hub           keys.Ed25519Identity `json:"hub"`
 	Nodes         map[string]NodeKeys  `json:"nodes"`
-	Wallet        map[string]string    `json:"wallet,omitempty"` // reserved for milestone 3/6
+	SVNodes       map[string]NodeKeys  `json:"svnodes,omitempty"` // only .Alert is used: the sidecar's identity
+	Wallet        map[string]string    `json:"wallet,omitempty"`  // reserved for milestone 3/6
 }
 
 // NodeKeys are a teranode's identities.
@@ -62,9 +66,21 @@ type nodeView struct {
 	HostRPC, HostAsset, HostHealth, HostProp, HostDash int
 }
 
+// svView is one SV node plus what its templates need.
+type svView struct {
+	topology.Node
+	AlertKey       string // the sidecar's ed25519 private key
+	HostRPC        int
+	HostSidecarAPI int
+}
+
 type view struct {
 	N              int
 	Nodes          []nodeView
+	SV             int
+	SVNodes        []svView
+	SVNodeImage    string
+	LegacyEnabled  bool // teranodes run the legacy (Bitcoin wire) service so SV nodes can follow
 	Hub            topology.Hub
 	HubKey         string
 	GenesisPubs    []string
@@ -86,33 +102,43 @@ type view struct {
 
 func main() {
 	n := flag.Int("n", 3, "number of teranodes (2..10)")
+	sv := flag.Int("sv", 2, "number of SV nodes following the teranodes (0..5), each with an alert sidecar")
 	out := flag.String("out", "stack", "output directory")
 	image := flag.String("teranode-image", "localhost/teranode-chaos:pr1764", "default teranode image")
+	svImage := flag.String("svnode-image", "docker.io/bitcoinsv/bitcoin-sv:1.2.2", "default SV node image")
 	discovery := flag.String("alert-discovery-interval", "15s", "alert p2p peer discovery interval")
 	flag.Parse()
 	if *n < 2 || *n > 10 {
 		fmt.Fprintln(os.Stderr, "-n must be in 2..10")
 		os.Exit(2)
 	}
-	if err := run(*n, *out, *image, *discovery); err != nil {
+	if *sv < 0 || *sv > 5 {
+		fmt.Fprintln(os.Stderr, "-sv must be in 0..5")
+		os.Exit(2)
+	}
+	if err := run(*n, *sv, *out, *image, *svImage, *discovery); err != nil {
 		fmt.Fprintln(os.Stderr, "error:", err)
 		os.Exit(1)
 	}
 }
 
-func run(n int, out, image, discovery string) error {
+func run(n, sv int, out, image, svImage, discovery string) error {
 	cfgDir := filepath.Join(out, "config")
-	for _, d := range []string{filepath.Join(cfgDir, "teranode"), filepath.Join(cfgDir, "alert-system"), filepath.Join(out, "scripts")} {
+	dirs := []string{filepath.Join(cfgDir, "teranode"), filepath.Join(cfgDir, "alert-system"), filepath.Join(out, "scripts")}
+	if sv > 0 {
+		dirs = append(dirs, filepath.Join(cfgDir, "svnode"))
+	}
+	for _, d := range dirs {
 		if err := os.MkdirAll(d, 0o755); err != nil {
 			return err
 		}
 	}
-	kf, err := loadOrCreateKeys(filepath.Join(cfgDir, "keys.json"), n)
+	kf, err := loadOrCreateKeys(filepath.Join(cfgDir, "keys.json"), n, sv)
 	if err != nil {
 		return err
 	}
 
-	v := view{N: n, TeranodeImage: image, Topic: alertTopic, Protocol: alertProtocol,
+	v := view{N: n, SV: sv, SVNodeImage: svImage, LegacyEnabled: sv > 0, TeranodeImage: image, Topic: alertTopic, Protocol: alertProtocol,
 		Generated: time.Now().UTC().Format(time.RFC3339), DiscoveryEvery: discovery, HubKey: kf.Hub.PrivateKeyHex, AdminAPIKey: kf.AdminAPIKey,
 		ArcadeToken: kf.ArcadeCallbackToken, WalletKey: kf.WalletServerKey.PrivateKeyHex}
 	v.Arcade = topology.Service{URL: "http://10.191.0.40:8080", HostURL: "http://localhost:18080", Container: "chaos-arcade",
@@ -152,10 +178,13 @@ func run(n int, out, image, discovery string) error {
 		nk := kf.Nodes[name]
 		base := 20000 + (i-1)*2000
 		node := topology.Node{
-			Name: name, Index: i, Container: "chaos-" + name,
+			Kind: "teranode", Name: name, Index: i, Container: "chaos-" + name,
 			ChaosIP: fmt.Sprintf("10.190.0.%d", 10+i), AlertIP: fmt.Sprintf("192.0.0.%d", 140+i), CtlIP: fmt.Sprintf("10.191.0.%d", 10+i),
 			PeerID: nk.P2P.PeerID, AlertPeerID: nk.Alert.PeerID, HostBase: base,
 			KafkaRejectedTx: "rejectedtx-" + name, KafkaInvalidBlocks: "invalid-blocks-" + name,
+		}
+		if v.LegacyEnabled {
+			node.LegacyAddr = node.ChaosIP + ":18444"
 		}
 		node.P2PAddr = fmt.Sprintf("/ip4/%s/tcp/9905/p2p/%s", node.ChaosIP, node.PeerID)
 		node.AlertAddr = fmt.Sprintf("/ip4/%s/tcp/9908/p2p/%s", node.AlertIP, node.AlertPeerID)
@@ -167,25 +196,65 @@ func run(n int, out, image, discovery string) error {
 		node.HostAssetURL = fmt.Sprintf("http://localhost:%d/api/v1", base+90)
 		inv.Nodes = append(inv.Nodes, node)
 	}
+	// SV nodes follow the teranodes over the legacy (Bitcoin wire) service. Each gets a
+	// go-alert-system sidecar on alertnet that applies alerts to it over RPC; the sidecar's
+	// multiaddr is the node's AlertAddr so push/probe/partition treat both kinds alike.
+	for j := 1; j <= sv; j++ {
+		name := fmt.Sprintf("svnode%d", j)
+		sk := kf.SVNodes[name]
+		base := 40000 + (j-1)*1000
+		node := topology.Node{
+			Kind: "svnode", Name: name, Index: j, Container: "chaos-" + name,
+			ChaosIP: fmt.Sprintf("10.190.0.%d", 20+j), CtlIP: fmt.Sprintf("10.191.0.%d", 20+j),
+			AlertIP: fmt.Sprintf("192.0.0.%d", 150+j), AlertPeerID: sk.Alert.PeerID, HostBase: base,
+		}
+		node.AlertAddr = fmt.Sprintf("/ip4/%s/tcp/9906/p2p/%s", node.AlertIP, node.AlertPeerID)
+		node.RPCURL = fmt.Sprintf("http://%s:18332", node.CtlIP)
+		node.HostRPCURL = fmt.Sprintf("http://localhost:%d", base+332)
+		node.Sidecar = &topology.Sidecar{Name: "alert-" + name, Container: "chaos-alert-" + name,
+			CtlIP: fmt.Sprintf("10.191.0.%d", 30+j), APIURL: fmt.Sprintf("http://10.191.0.%d:3000", 30+j), HostAPI: fmt.Sprintf("http://localhost:%d", base+300)}
+		inv.Nodes = append(inv.Nodes, node)
+	}
+	for i := range inv.Nodes {
+		if !inv.Nodes[i].IsSV() {
+			continue
+		}
+		var peers []string
+		for j := range inv.Nodes {
+			switch {
+			case j == i:
+			case inv.Nodes[j].IsSV():
+				peers = append(peers, inv.Nodes[j].ChaosIP+":18444")
+			case inv.Nodes[j].LegacyAddr != "":
+				peers = append(peers, inv.Nodes[j].LegacyAddr)
+			}
+		}
+		inv.Nodes[i].LegacyPeers = peers
+	}
 	inv.Services["arcade"] = v.Arcade
 	inv.Services["merkle-service"] = v.Merkle
 	inv.Services["wallet-infra"] = v.Wallet
-	for i := range inv.Nodes {
-		v.DatahubURLs = append(v.DatahubURLs, fmt.Sprintf("http://%s:8090/api/v1", inv.Nodes[i].ChaosIP))
-		v.P2PAddrs = append(v.P2PAddrs, inv.Nodes[i].P2PAddr)
+	teranodes := inv.Teranodes()
+	for i := range teranodes {
+		v.DatahubURLs = append(v.DatahubURLs, fmt.Sprintf("http://%s:8090/api/v1", teranodes[i].ChaosIP))
+		v.P2PAddrs = append(v.P2PAddrs, teranodes[i].P2PAddr)
 	}
-	for i := range inv.Nodes {
-		node := inv.Nodes[i]
+	for i := range teranodes {
+		node := teranodes[i]
 		var peers []string
-		for j := range inv.Nodes {
+		for j := range teranodes {
 			if j != i {
-				peers = append(peers, inv.Nodes[j].P2PAddr)
+				peers = append(peers, teranodes[j].P2PAddr)
 			}
 		}
 		nk := kf.Nodes[node.Name]
 		v.Nodes = append(v.Nodes, nodeView{Node: node, P2PKey: nk.P2P.PrivateKeyHex, AlertKey: nk.Alert.PrivateKeyHex,
 			StaticPeers: strings.Join(peers, " | "),
 			HostRPC:     node.HostBase + 1292, HostAsset: node.HostBase + 90, HostHealth: node.HostBase, HostProp: node.HostBase + 833, HostDash: node.HostBase + 90})
+	}
+	for _, node := range inv.SVNodes() {
+		v.SVNodes = append(v.SVNodes, svView{Node: node, AlertKey: kf.SVNodes[node.Name].Alert.PrivateKeyHex,
+			HostRPC: node.HostBase + 332, HostSidecarAPI: node.HostBase + 300})
 	}
 
 	if err := render(composeTmpl, filepath.Join(out, "compose.yaml"), v); err != nil {
@@ -202,8 +271,24 @@ func run(n int, out, image, discovery string) error {
 			return err
 		}
 	}
-	if err := writeHubConfig(filepath.Join(cfgDir, "alert-system", "config.json"), v, inv); err != nil {
+	// The hub bootstraps to teranode1 (mutual bootstrap converges) and points its RPC at
+	// teranode1, which ignores the SV-style calls; sidecars bootstrap to the hub and point
+	// their RPC at their own SV node, retrying failed applies every 30 s.
+	if err := writeJSON(filepath.Join(cfgDir, "alert-system", "config.json"),
+		alertSystemConfig(v, teranodes[0].AlertAddr, teranodes[0].RPCURL, v.HubKey, "5m")); err != nil {
 		return err
+	}
+	for _, sn := range v.SVNodes {
+		if err := writeJSON(filepath.Join(cfgDir, "alert-system", sn.Name+".json"),
+			alertSystemConfig(v, v.Hub.AlertAddr, sn.RPCURL, sn.AlertKey, "30s")); err != nil {
+			return err
+		}
+		if err := render(svnodeConfTmpl, filepath.Join(cfgDir, "svnode", sn.Name+".conf"), struct {
+			svView
+			view
+		}{sn, v}); err != nil {
+			return err
+		}
 	}
 	if err := render(toolsEnvTmpl, filepath.Join(cfgDir, "tools.env"), v); err != nil {
 		return err
@@ -225,11 +310,11 @@ func run(n int, out, image, discovery string) error {
 	if err := writeJSON(filepath.Join(cfgDir, "inventory.json"), inv); err != nil {
 		return err
 	}
-	fmt.Printf("generated %d-node stack under %s\n  podman compose -f %s/compose.yaml up -d\n", n, out, out)
+	fmt.Printf("generated %d-teranode, %d-svnode stack under %s\n  podman compose -f %s/compose.yaml up -d\n", n, sv, out, out)
 	return nil
 }
 
-func loadOrCreateKeys(path string, n int) (*KeysFile, error) {
+func loadOrCreateKeys(path string, n, sv int) (*KeysFile, error) {
 	kf := &KeysFile{Nodes: map[string]NodeKeys{}}
 	if b, err := os.ReadFile(path); err == nil {
 		if err := json.Unmarshal(b, kf); err != nil {
@@ -237,6 +322,12 @@ func loadOrCreateKeys(path string, n int) (*KeysFile, error) {
 		}
 	} else if !errors.Is(err, os.ErrNotExist) {
 		return nil, err
+	}
+	if kf.Nodes == nil {
+		kf.Nodes = map[string]NodeKeys{}
+	}
+	if kf.SVNodes == nil {
+		kf.SVNodes = map[string]NodeKeys{}
 	}
 	changed := false
 	for len(kf.Genesis) < 5 {
@@ -303,6 +394,18 @@ func loadOrCreateKeys(path string, n int) (*KeysFile, error) {
 		kf.Nodes[name] = nk
 		changed = true
 	}
+	for j := 1; j <= sv; j++ {
+		name := fmt.Sprintf("svnode%d", j)
+		sk, ok := kf.SVNodes[name]
+		if ok && sk.Alert.PeerID != "" {
+			continue
+		}
+		if sk.Alert, err = keys.NewEd25519Identity(); err != nil {
+			return nil, err
+		}
+		kf.SVNodes[name] = sk
+		changed = true
+	}
 	if changed {
 		if err := writeJSON(path, kf); err != nil {
 			return nil, err
@@ -311,9 +414,11 @@ func loadOrCreateKeys(path string, n int) (*KeysFile, error) {
 	return kf, nil
 }
 
-func writeHubConfig(path string, v view, inv topology.Inventory) error {
-	cfg := map[string]any{
-		"alert_processing_interval": "5m",
+// alertSystemConfig renders a go-alert-system config: for the hub (bootstrap = teranode1,
+// RPC = teranode1) or for an SV node's sidecar (bootstrap = hub, RPC = that SV node).
+func alertSystemConfig(v view, bootstrap, rpcURL, privateKey, processingInterval string) map[string]any {
+	return map[string]any{
+		"alert_processing_interval": processingInterval,
 		"alert_webhook_url":         "",
 		"bitcoin_config_path":       "",
 		"datastore": map[string]any{
@@ -328,19 +433,18 @@ func writeHubConfig(path string, v view, inv topology.Inventory) error {
 		"log_level":                "debug",
 		"p2p": map[string]any{
 			"alert_system_protocol_id":   alertProtocol,
-			"bootstrap_peer":             inv.Nodes[0].AlertAddr,
+			"bootstrap_peer":             bootstrap,
 			"ip":                         "0.0.0.0",
 			"port":                       "9906",
 			"peer_discovery_interval":    v.DiscoveryEvery,
 			"allow_private_ip_addresses": false, // alertnet is public-looking; keep alert traffic off ctlnet
-			"private_key":                v.HubKey,
+			"private_key":                privateKey,
 			"topic_name":                 alertTopic,
 		},
 		"request_logging": true,
-		"rpc_connections": []map[string]string{{"host": inv.Nodes[0].RPCURL, "user": rpcUser, "password": rpcPass}},
+		"rpc_connections": []map[string]string{{"host": rpcURL, "user": rpcUser, "password": rpcPass}},
 		"web_server":      map[string]string{"idle_timeout": "60s", "port": "3000", "read_timeout": "15s", "write_timeout": "15s"},
 	}
-	return writeJSON(path, cfg)
 }
 
 func writeJSON(path string, v any) error {

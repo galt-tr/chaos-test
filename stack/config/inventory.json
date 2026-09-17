@@ -1,6 +1,6 @@
 {
   "network": "regtest",
-  "generated": "2026-09-17T13:14:09Z",
+  "generated": "2026-09-17T16:10:47Z",
   "networks": {
     "chaosnet": "10.190.0.0/24",
     "alertnet": "192.0.0.128/26",
@@ -8,6 +8,7 @@
   },
   "nodes": [
     {
+      "kind": "teranode",
       "name": "teranode1",
       "index": 1,
       "chaosIP": "10.190.0.11",
@@ -26,9 +27,11 @@
       "hostBase": 20000,
       "kafkaRejectedTx": "rejectedtx-teranode1",
       "kafkaInvalidBlocks": "invalid-blocks-teranode1",
-      "container": "chaos-teranode1"
+      "container": "chaos-teranode1",
+      "legacyAddr": "10.190.0.11:18444"
     },
     {
+      "kind": "teranode",
       "name": "teranode2",
       "index": 2,
       "chaosIP": "10.190.0.12",
@@ -47,9 +50,11 @@
       "hostBase": 22000,
       "kafkaRejectedTx": "rejectedtx-teranode2",
       "kafkaInvalidBlocks": "invalid-blocks-teranode2",
-      "container": "chaos-teranode2"
+      "container": "chaos-teranode2",
+      "legacyAddr": "10.190.0.12:18444"
     },
     {
+      "kind": "teranode",
       "name": "teranode3",
       "index": 3,
       "chaosIP": "10.190.0.13",
@@ -68,7 +73,78 @@
       "hostBase": 24000,
       "kafkaRejectedTx": "rejectedtx-teranode3",
       "kafkaInvalidBlocks": "invalid-blocks-teranode3",
-      "container": "chaos-teranode3"
+      "container": "chaos-teranode3",
+      "legacyAddr": "10.190.0.13:18444"
+    },
+    {
+      "kind": "svnode",
+      "name": "svnode1",
+      "index": 1,
+      "chaosIP": "10.190.0.21",
+      "alertIP": "192.0.0.151",
+      "ctlIP": "10.191.0.21",
+      "peerID": "",
+      "alertPeerID": "12D3KooWKjgX4mwRdvEfy751vGCi622fG4apGtdQd5zPhJQauaau",
+      "alertAddr": "/ip4/192.0.0.151/tcp/9906/p2p/12D3KooWKjgX4mwRdvEfy751vGCi622fG4apGtdQd5zPhJQauaau",
+      "p2pAddr": "",
+      "rpcURL": "http://10.191.0.21:18332",
+      "assetURL": "",
+      "propagationURL": "",
+      "healthURL": "",
+      "hostRPCURL": "http://localhost:40332",
+      "hostAssetURL": "",
+      "hostBase": 40000,
+      "kafkaRejectedTx": "",
+      "kafkaInvalidBlocks": "",
+      "container": "chaos-svnode1",
+      "legacyPeers": [
+        "10.190.0.11:18444",
+        "10.190.0.12:18444",
+        "10.190.0.13:18444",
+        "10.190.0.22:18444"
+      ],
+      "sidecar": {
+        "name": "alert-svnode1",
+        "container": "chaos-alert-svnode1",
+        "ctlIP": "10.191.0.31",
+        "apiURL": "http://10.191.0.31:3000",
+        "hostAPIURL": "http://localhost:40300"
+      }
+    },
+    {
+      "kind": "svnode",
+      "name": "svnode2",
+      "index": 2,
+      "chaosIP": "10.190.0.22",
+      "alertIP": "192.0.0.152",
+      "ctlIP": "10.191.0.22",
+      "peerID": "",
+      "alertPeerID": "12D3KooWRG6dDMBqzLdSHqi7FjkzrLsUeddoCHSDDZ5ZQdC2JHv8",
+      "alertAddr": "/ip4/192.0.0.152/tcp/9906/p2p/12D3KooWRG6dDMBqzLdSHqi7FjkzrLsUeddoCHSDDZ5ZQdC2JHv8",
+      "p2pAddr": "",
+      "rpcURL": "http://10.191.0.22:18332",
+      "assetURL": "",
+      "propagationURL": "",
+      "healthURL": "",
+      "hostRPCURL": "http://localhost:41332",
+      "hostAssetURL": "",
+      "hostBase": 41000,
+      "kafkaRejectedTx": "",
+      "kafkaInvalidBlocks": "",
+      "container": "chaos-svnode2",
+      "legacyPeers": [
+        "10.190.0.11:18444",
+        "10.190.0.12:18444",
+        "10.190.0.13:18444",
+        "10.190.0.21:18444"
+      ],
+      "sidecar": {
+        "name": "alert-svnode2",
+        "container": "chaos-alert-svnode2",
+        "ctlIP": "10.191.0.32",
+        "apiURL": "http://10.191.0.32:3000",
+        "hostAPIURL": "http://localhost:41300"
+      }
     }
   ],
   "hub": {

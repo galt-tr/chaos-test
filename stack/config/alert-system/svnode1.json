@@ -1,0 +1,51 @@
+{
+  "alert_processing_interval": "30s",
+  "alert_webhook_url": "",
+  "bitcoin_config_path": "",
+  "datastore": {
+    "auto_migrate": true,
+    "debug": false,
+    "engine": "sqlite",
+    "password": "",
+    "sqlite": {
+      "database_path": "/data/alert.db",
+      "shared": false
+    },
+    "table_prefix": "alert_system"
+  },
+  "disable_rpc_verification": true,
+  "environment": "local",
+  "genesis_keys": [
+    "02461ae286f650c0c8ed1443878c2c175421c9cd4b55e9c0f90b2f9f632809e9e1",
+    "024dbb4d7a102e4523d98d3f072d4c5becaa40467d3e0d71c080bcdb1c86e6f20d",
+    "02ac035846df2c3f8d3a8d6f4dc827b22a3b1f09cd9c3f4bc9c4be341bd082a877",
+    "0251f3950a900533ef793c258d9d9cfade828fca112a3ec443a5d764b3c2304515",
+    "03752c3c782243daaad416251c4df6bd89689cec6eefba9a568c6346d9f2c6ef4a"
+  ],
+  "log_level": "debug",
+  "log_output_file": "",
+  "p2p": {
+    "alert_system_protocol_id": "/bitcoin/alert-system/1.0.0",
+    "allow_private_ip_addresses": false,
+    "bootstrap_peer": "/ip4/192.0.0.130/tcp/9906/p2p/12D3KooWKsvJigHNVRpZCsKYJJfyd1HTBNKob1YWKRKj6CbD93NR",
+    "ip": "0.0.0.0",
+    "peer_discovery_interval": "15s",
+    "port": "9906",
+    "private_key": "1a2a3aef5953da6e0d7eefbe25cd0e226ec97c07cf4db5d210f700924b358a0c9361b6cbd06c6472b278d5148ef709c4f5f90ce26de8eefe54e68f5857a73822",
+    "topic_name": "bitcoin_alert_system_regtest"
+  },
+  "request_logging": true,
+  "rpc_connections": [
+    {
+      "host": "http://10.191.0.21:18332",
+      "password": "bitcoin",
+      "user": "bitcoin"
+    }
+  ],
+  "web_server": {
+    "idle_timeout": "60s",
+    "port": "3000",
+    "read_timeout": "15s",
+    "write_timeout": "15s"
+  }
+}

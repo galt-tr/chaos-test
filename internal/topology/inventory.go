@@ -31,8 +31,12 @@ type Networks struct {
 	Ctl   string `json:"ctlnet"`   // control plane
 }
 
-// Node is one teranode.
+// Node is one node of the fleet: a teranode (Kind "teranode", or empty in older inventories)
+// or an SV Node (Kind "svnode"). SV nodes have no asset API, no embedded alert service and no
+// Kafka topics; their alert-network presence is a go-alert-system sidecar (Sidecar), whose
+// multiaddr is what AlertAddr/AlertIP/AlertPeerID describe.
 type Node struct {
+	Kind        string `json:"kind,omitempty"` // teranode | svnode
 	Name        string `json:"name"`
 	Index       int    `json:"index"`
 	ChaosIP     string `json:"chaosIP"`
@@ -55,6 +59,44 @@ type Node struct {
 	KafkaRejectedTx    string `json:"kafkaRejectedTx"`
 	KafkaInvalidBlocks string `json:"kafkaInvalidBlocks"`
 	Container          string `json:"container"`
+	// Legacy (Bitcoin wire protocol) bridging between teranodes and SV nodes:
+	LegacyAddr  string   `json:"legacyAddr,omitempty"`  // teranode: <chaosIP>:18444 when its legacy service is on
+	LegacyPeers []string `json:"legacyPeers,omitempty"` // svnode: the -connect targets it syncs from
+	Sidecar     *Sidecar `json:"sidecar,omitempty"`     // svnode: its go-alert-system sidecar
+}
+
+// Sidecar is the go-alert-system process that applies alerts to an SV node over RPC.
+type Sidecar struct {
+	Name      string `json:"name"`
+	Container string `json:"container"`
+	CtlIP     string `json:"ctlIP"`
+	APIURL    string `json:"apiURL"`     // in-network /health, /alerts
+	HostAPI   string `json:"hostAPIURL"` // host-published
+}
+
+// IsSV reports whether the node is an SV Node.
+func (n *Node) IsSV() bool { return n.Kind == "svnode" }
+
+// Teranodes returns the teranodes in inventory order.
+func (inv *Inventory) Teranodes() []Node {
+	var out []Node
+	for _, n := range inv.Nodes {
+		if !n.IsSV() {
+			out = append(out, n)
+		}
+	}
+	return out
+}
+
+// SVNodes returns the SV nodes in inventory order.
+func (inv *Inventory) SVNodes() []Node {
+	var out []Node
+	for _, n := range inv.Nodes {
+		if n.IsSV() {
+			out = append(out, n)
+		}
+	}
+	return out
 }
 
 // Hub is the go-alert-system node.
@@ -127,11 +169,12 @@ func Load(path string) (*Inventory, error) {
 	return &inv, nil
 }
 
-// Node returns the node with the given name or 1-based index string.
+// Node returns the node with the given name, or the teranode with the given 1-based index
+// (SV nodes number from 1 too and are addressed by name only).
 func (inv *Inventory) Node(nameOrIndex string) (*Node, error) {
 	for i := range inv.Nodes {
 		n := &inv.Nodes[i]
-		if n.Name == nameOrIndex || fmt.Sprint(n.Index) == nameOrIndex {
+		if n.Name == nameOrIndex || (!n.IsSV() && fmt.Sprint(n.Index) == nameOrIndex) {
 			return n, nil
 		}
 	}
@@ -153,6 +196,9 @@ func (inv *Inventory) UseHostURLs() {
 		// health probe would dial the unreachable ctlnet address in -host-mode.
 		if n.HostBase != 0 {
 			n.HealthURL = fmt.Sprintf("http://localhost:%d/health", n.HostBase)
+		}
+		if n.Sidecar != nil && n.Sidecar.HostAPI != "" {
+			n.Sidecar.APIURL = n.Sidecar.HostAPI
 		}
 	}
 	if inv.Hub != nil && inv.Hub.HostAPI != "" {
