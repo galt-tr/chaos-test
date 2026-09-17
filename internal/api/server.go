@@ -20,6 +20,7 @@ import (
 	"github.com/bsv-blockchain/chaos-test/internal/alerts"
 	"github.com/bsv-blockchain/chaos-test/internal/chaos"
 	"github.com/bsv-blockchain/chaos-test/internal/observe"
+	"github.com/bsv-blockchain/chaos-test/internal/svnode"
 	"github.com/bsv-blockchain/chaos-test/internal/teranode"
 	"github.com/bsv-blockchain/chaos-test/internal/topology"
 	"github.com/bsv-blockchain/chaos-test/internal/wallet"
@@ -208,6 +209,78 @@ func decode(r *http.Request, v any) error {
 
 func (s *Server) node(name string) (*topology.Node, error) {
 	return s.d.Inventory.Node(name)
+}
+
+// defaultNode is the first teranode (SV nodes have no asset API), else the first node.
+func (s *Server) defaultNode() string {
+	if tn := s.d.Inventory.Teranodes(); len(tn) > 0 {
+		return tn[0].Name
+	}
+	return s.d.Inventory.Nodes[0].Name
+}
+
+// txHex fetches a transaction's raw hex from a node: asset API on teranodes, RPC on SV nodes.
+func (s *Server) txHex(ctx context.Context, n *topology.Node, txid string) (string, error) {
+	if sv := s.d.Fleet.SV(n.Name); sv != nil {
+		t, err := sv.RawTransaction(ctx, txid)
+		if err != nil {
+			return "", err
+		}
+		return t.Hex, nil
+	}
+	a := s.d.Fleet.Asset(n.Name)
+	if a == nil {
+		return "", fmt.Errorf("node %s has no asset API", n.Name)
+	}
+	return a.TxHex(ctx, txid)
+}
+
+// CoinbaseInfo describes a block's coinbase transaction.
+type CoinbaseInfo struct {
+	Height uint32 `json:"height"`
+	Hash   string `json:"hash"`
+	TxID   string `json:"txid"`
+	Hex    string `json:"hex"`
+}
+
+// Coinbase returns the coinbase of the block at height on a node (shared with the engine).
+func (s *Server) Coinbase(ctx context.Context, node string, height uint32) (*CoinbaseInfo, error) {
+	n, err := s.node(node)
+	if err != nil {
+		return nil, err
+	}
+	if sv := s.d.Fleet.SV(n.Name); sv != nil {
+		hash, err := sv.BlockHash(ctx, height)
+		if err != nil {
+			return nil, err
+		}
+		b, err := sv.Block(ctx, hash)
+		if err != nil {
+			return nil, err
+		}
+		if len(b.Tx) == 0 {
+			return nil, fmt.Errorf("block %s has no transactions", hash)
+		}
+		t, err := sv.RawTransaction(ctx, b.Tx[0])
+		if err != nil {
+			return nil, err
+		}
+		return &CoinbaseInfo{Height: b.Height, Hash: b.Hash, TxID: t.TxID, Hex: t.Hex}, nil
+	}
+	a := s.d.Fleet.Asset(n.Name)
+	if a == nil {
+		return nil, fmt.Errorf("node %s has no asset API", n.Name)
+	}
+	b, err := a.BlockByHeight(ctx, height)
+	if err != nil {
+		return nil, err
+	}
+	var cb struct {
+		TxID string `json:"txid"`
+		Hex  string `json:"hex"`
+	}
+	_ = json.Unmarshal(b.CoinbaseTx, &cb)
+	return &CoinbaseInfo{Height: b.Height, Hash: b.Hash, TxID: cb.TxID, Hex: cb.Hex}, nil
 }
 
 // ---- inventory / state / events -----------------------------------------------------------
@@ -494,8 +567,23 @@ func (s *Server) postAlertRPC(w http.ResponseWriter, r *http.Request) {
 	defer cancel()
 	switch req.Action {
 	case "freeze":
-		err = s.d.Fleet.RPC(n.Name).Freeze(ctx, req.TxID, req.Vout, req.Start, req.Stop, req.PolicyExpires)
+		if sv := s.d.Fleet.SV(n.Name); sv != nil {
+			f := alerts.Fund{TxID: req.TxID, Vout: req.Vout, PolicyExpiresWithConsensus: req.PolicyExpires}
+			if req.Start != nil {
+				f.EnforceAtHeightStart = *req.Start
+			}
+			if req.Stop != nil {
+				f.EnforceAtHeightStop = *req.Stop
+			}
+			err = sv.AddToConsensusBlacklist(ctx, []alerts.Fund{f})
+		} else {
+			err = s.d.Fleet.RPC(n.Name).Freeze(ctx, req.TxID, req.Vout, req.Start, req.Stop, req.PolicyExpires)
+		}
 	case "unfreeze":
+		if s.d.Fleet.IsSV(n.Name) {
+			writeErr(w, 400, errors.New("unfreeze on an SV node is not supported (SV Node has no removeFromConsensusBlacklist; use clearBlacklists)"))
+			return
+		}
 		err = s.d.Fleet.RPC(n.Name).Unfreeze(ctx, req.TxID, req.Vout)
 	default:
 		err = fmt.Errorf("unknown action %q", req.Action)
@@ -553,7 +641,7 @@ type SpendResult struct {
 // Spend builds a transaction (shared with the scenario engine).
 func (s *Server) Spend(ctx context.Context, req SpendRequest) (*SpendResult, error) {
 	if req.Node == "" {
-		req.Node = s.d.Inventory.Nodes[0].Name
+		req.Node = s.defaultNode()
 	}
 	n, err := s.node(req.Node)
 	if err != nil {
@@ -563,7 +651,7 @@ func (s *Server) Spend(ctx context.Context, req SpendRequest) (*SpendResult, err
 	if err != nil {
 		return nil, err
 	}
-	srcHex, err := s.d.Fleet.Asset(n.Name).TxHex(ctx, req.TxID)
+	srcHex, err := s.txHex(ctx, n, req.TxID)
 	if err != nil {
 		return nil, err
 	}
@@ -674,6 +762,17 @@ func (s *Server) Submit(ctx context.Context, target, txHex, efHex string) (*Subm
 	if err != nil {
 		return nil, err
 	}
+	if s.d.Fleet.IsSV(n.Name) {
+		// SV Node: sendrawtransaction; a policy/consensus rejection is an RPC error, reported
+		// like a node's HTTP rejection (status 400 + reason) rather than as a failure.
+		txid, rerr := s.d.Fleet.RPC(n.Name).SendRawTransaction(ctx, strings.TrimSpace(txHex))
+		res := &SubmitResult{Target: n.Name, TxID: txid, Accepted: rerr == nil, Status: 200}
+		if rerr != nil {
+			res.Status, res.Body, res.TxID = 400, rerr.Error(), txidOf(txHex)
+		}
+		s.d.Bus.Publish("tx", n.Name, fmt.Sprintf("submitted to %s: %d %s", n.Name, res.Status, short(res.Body)), map[string]any{"status": res.Status, "body": res.Body, "txid": res.TxID})
+		return res, nil
+	}
 	raw, err := hex.DecodeString(strings.TrimSpace(txHex))
 	if err != nil {
 		return nil, fmt.Errorf("tx hex: %w", err)
@@ -720,7 +819,7 @@ func (s *Server) getTx(w http.ResponseWriter, r *http.Request) {
 	txid := r.PathValue("txid")
 	nodeName := r.URL.Query().Get("node")
 	if nodeName == "" {
-		nodeName = s.d.Inventory.Nodes[0].Name
+		nodeName = s.defaultNode()
 	}
 	n, err := s.node(nodeName)
 	if err != nil {
@@ -730,6 +829,11 @@ func (s *Server) getTx(w http.ResponseWriter, r *http.Request) {
 	ctx, cancel := context.WithTimeout(r.Context(), 15*time.Second)
 	defer cancel()
 	out := map[string]any{"node": n.Name, "txid": txid}
+	if sv := s.d.Fleet.SV(n.Name); sv != nil {
+		s.getTxSV(ctx, sv, n.Name, txid, out)
+		writeJSON(w, 200, out)
+		return
+	}
 	if meta, err := s.d.Fleet.Asset(n.Name).TxMeta(ctx, txid); err == nil {
 		meta.Tx, meta.SpendingDatas = nil, nil
 		out["txmeta"] = meta
@@ -747,30 +851,52 @@ func (s *Server) getTx(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, 200, out)
 }
 
+// getTxSV renders the SV-node view of a transaction in the shape the UI expects from the
+// teranode path: txmeta (block heights, coinbase), utxos (per-output status) and hex.
+func (s *Server) getTxSV(ctx context.Context, sv *svnode.Client, node, txid string, out map[string]any) {
+	t, err := sv.RawTransaction(ctx, txid)
+	if err != nil {
+		out["txmetaError"] = err.Error()
+		out["utxosError"] = err.Error()
+		return
+	}
+	out["hex"] = t.Hex
+	meta := map[string]any{"isCoinbase": len(t.Vin) > 0 && t.Vin[0].Coinbase != "", "frozen": false}
+	if t.BlockHash != "" {
+		if h, err := sv.HeaderByHash(ctx, t.BlockHash); err == nil {
+			meta["blockHeights"] = []uint32{h.Height}
+		}
+	}
+	utxos := make([]teranode.UTXOOutput, 0, len(t.Vout))
+	for _, o := range t.Vout {
+		u := teranode.UTXOOutput{TxID: txid, Vout: o.N, LockingScript: o.ScriptPubKey.Hex, Satoshis: svnode.Satoshis(o.Value), Status: "SPENT"}
+		if txo, err := sv.TxOut(ctx, txid, o.N); err == nil && txo != nil {
+			u.Status = "OK"
+			if frozen, err := s.d.Fleet.SVFrozen(ctx, node, txid, o.N); err == nil && frozen {
+				u.Status = "FROZEN"
+				meta["frozen"] = true
+			}
+		}
+		utxos = append(utxos, u)
+	}
+	out["txmeta"] = meta
+	out["utxos"] = utxos
+}
+
 func (s *Server) getCoinbase(w http.ResponseWriter, r *http.Request) {
 	nodeName := r.URL.Query().Get("node")
 	if nodeName == "" {
-		nodeName = s.d.Inventory.Nodes[0].Name
-	}
-	n, err := s.node(nodeName)
-	if err != nil {
-		writeErr(w, 404, err)
-		return
+		nodeName = s.defaultNode()
 	}
 	h, _ := strconv.Atoi(r.URL.Query().Get("height"))
 	ctx, cancel := context.WithTimeout(r.Context(), 15*time.Second)
 	defer cancel()
-	b, err := s.d.Fleet.Asset(n.Name).BlockByHeight(ctx, uint32(h))
+	cb, err := s.Coinbase(ctx, nodeName, uint32(h))
 	if err != nil {
 		writeErr(w, 502, err)
 		return
 	}
-	var cb struct {
-		TxID string `json:"txid"`
-		Hex  string `json:"hex"`
-	}
-	_ = json.Unmarshal(b.CoinbaseTx, &cb)
-	writeJSON(w, 200, map[string]any{"height": b.Height, "hash": b.Hash, "txid": cb.TxID, "hex": cb.Hex})
+	writeJSON(w, 200, cb)
 }
 
 func (s *Server) postWatch(w http.ResponseWriter, r *http.Request) {
@@ -802,11 +928,19 @@ func (s *Server) Partition(ctx context.Context, node, plane string, on bool) err
 		return err
 	}
 	var network, ip string
+	container := n.Container
 	switch plane {
 	case "p2p":
 		network, ip = "chaos_chaosnet", n.ChaosIP
 	case "alert":
 		network, ip = "chaos_alertnet", n.AlertIP
+		if n.IsSV() {
+			// An SV node is not on the alert network itself; its sidecar is.
+			if n.Sidecar == nil {
+				return fmt.Errorf("%s has no alert sidecar to partition", n.Name)
+			}
+			container = n.Sidecar.Container
+		}
 	default:
 		return fmt.Errorf("plane must be p2p or alert, got %q", plane)
 	}
@@ -816,15 +950,15 @@ func (s *Server) Partition(ctx context.Context, node, plane string, on bool) err
 	defer s.netMu.Unlock()
 	for attempt := 1; attempt <= 3; attempt++ {
 		if on {
-			err = s.d.Runtime.NetworkDisconnect(ctx, network, n.Container)
+			err = s.d.Runtime.NetworkDisconnect(ctx, network, container)
 		} else {
-			err = s.d.Runtime.NetworkConnect(ctx, network, n.Container, ip)
+			err = s.d.Runtime.NetworkConnect(ctx, network, container, ip)
 		}
 		if err != nil && !(!on && strings.Contains(err.Error(), "already")) {
 			s.d.Bus.Publish("error", n.Name, fmt.Sprintf("partition %s %s on=%v failed (attempt %d): %v", n.Name, plane, on, attempt, err), nil)
 			continue
 		}
-		if verr := s.verifyAttachment(ctx, n.Container, network, !on); verr == nil {
+		if verr := s.verifyAttachment(ctx, container, network, !on); verr == nil {
 			err = nil
 			break
 		} else {

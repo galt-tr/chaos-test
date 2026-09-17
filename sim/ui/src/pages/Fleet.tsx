@@ -1,5 +1,5 @@
 import { useMemo, useState, type ReactNode } from 'react';
-import type { Event, NodeState, Snapshot } from '../api';
+import { isSV, type Event, type NodeState, type Snapshot } from '../api';
 import { useLiveCtx } from '../live';
 import { EVENT_KINDS, ago, fmtTime, hashColor, useActions } from '../hooks';
 import { NodeControls, type ActionProps } from '../nodeactions';
@@ -71,12 +71,16 @@ function Consensus({ snap }: { snap: Snapshot }) {
 
 function NodeCard({ n, status, run }: ActionProps) {
   const seq = n.alertSeq < 0 ? 'n/a' : `#${n.alertSeq}`;
+  const sv = isSV(n);
+  const unprocessed = n.alertUnprocessed ?? -1;
   return (
     <div className={`panel node ${n.reachable ? '' : 'down'}`}>
       <div className="row between">
-        <h2 style={{ margin: 0 }}>{n.name} <span className="muted lower">{n.version ? `v${n.version}` : ''}</span></h2>
+        <h2 style={{ margin: 0 }}>
+          {n.name} <span className="muted lower">{sv ? `SV Node${n.version ? ` · ${n.version}` : ''}` : n.version ? `v${n.version}` : ''}</span>
+        </h2>
         <span className="row">
-          {n.partitions?.map((p) => <Pill key={p} ok={false} title={`${p} plane disconnected`}>{p} plane cut</Pill>)}
+          {n.partitions?.map((p) => <Pill key={p} ok={false} title={`${p} plane disconnected${sv && p === 'alert' ? ' (sidecar)' : ''}`}>{p} plane cut</Pill>)}
           <Pill ok={n.reachable}>{n.reachable ? 'reachable' : 'unreachable'}</Pill>
           {n.hostURL && (
             <a className="btn" href={n.hostURL} target="_blank" rel="noreferrer"
@@ -85,18 +89,22 @@ function NodeCard({ n, status, run }: ActionProps) {
         </span>
       </div>
       <dl className="kv">
-        <dt>FSM</dt><dd><span className={n.fsm === 'RUNNING' ? 'ok' : n.fsm ? 'warn' : 'muted'}>{n.fsm || '—'}</span></dd>
+        {sv
+          ? <><dt>peers</dt><dd><b>{n.reachable ? n.peers ?? 0 : '—'}</b> <span className="muted small">outbound to the teranodes' legacy service</span></dd></>
+          : <><dt>FSM</dt><dd><span className={n.fsm === 'RUNNING' ? 'ok' : n.fsm ? 'warn' : 'muted'}>{n.fsm || '—'}</span></dd></>}
         <dt>height</dt><dd><b>{n.reachable ? n.height : '—'}</b></dd>
         <dt>tip</dt><dd><Tip hash={n.tip} /></dd>
         <dt>mempool</dt><dd>{n.mempoolCount}{n.mempool?.length ? <TxList txids={n.mempool} total={n.mempoolCount} /> : null}</dd>
-        <dt>alert seq</dt>
+        <dt>{sv ? 'alert seq (sidecar)' : 'alert seq'}</dt>
         <dd>
           <b>{seq}</b>{' '}
-          <span className={`small ${n.alertReachable ? 'ok' : 'muted'}`} title="alert-system p2p endpoint reachable from the orchestrator">
+          <span className={`small ${n.alertReachable ? 'ok' : 'muted'}`} title={sv ? 'the go-alert-system sidecar that applies alerts to this SV node over RPC, probed over the alert p2p network' : 'alert-system p2p endpoint reachable from the orchestrator'}>
             {n.alertReachable ? 'alert p2p up' : 'alert p2p unreachable'}
           </span>
+          {sv && unprocessed > 0 && <Pill ok={false} className="small" title="alerts the sidecar received but could not apply to the SV node over RPC (retried every 30 s)"> {unprocessed} unprocessed</Pill>}
+          {sv && n.sidecarURL && <a className="small" href={`${n.sidecarURL}/health`} target="_blank" rel="noreferrer" style={{ marginLeft: 6 }}>sidecar health ↗</a>}
         </dd>
-        <dt>container</dt><dd><code>{n.container}</code></dd>
+        <dt>container</dt><dd><code>{n.container}</code>{sv && n.sidecarContainer ? <> <span className="muted small">+</span> <code>{n.sidecarContainer}</code></> : null}</dd>
         <dt>updated</dt><dd className="muted">{ago(n.updatedAt)} ago</dd>
       </dl>
       <NodeControls n={n} status={status} run={run} />

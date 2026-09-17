@@ -12,26 +12,35 @@ import (
 
 	"github.com/bsv-blockchain/chaos-test/internal/alerts"
 	"github.com/bsv-blockchain/chaos-test/internal/arcade"
+	"github.com/bsv-blockchain/chaos-test/internal/svnode"
 	"github.com/bsv-blockchain/chaos-test/internal/teranode"
 	"github.com/bsv-blockchain/chaos-test/internal/topology"
 )
 
 // NodeState is the harness's current view of one teranode.
 type NodeState struct {
+	Kind           string   `json:"kind"` // teranode | svnode
 	Name           string   `json:"name"`
 	Index          int      `json:"index"`
 	Reachable      bool     `json:"reachable"`
 	Height         uint32   `json:"height"`
 	Tip            string   `json:"tip"`
-	FSM            string   `json:"fsm"`
+	FSM            string   `json:"fsm"`             // teranode only
+	Peers          int      `json:"peers,omitempty"` // svnode: getpeerinfo count
 	MempoolCount   int      `json:"mempoolCount"`
 	Mempool        []string `json:"mempool,omitempty"`
 	AlertSeq       int64    `json:"alertSeq"` // -1 = unknown / unreachable
 	AlertReachable bool     `json:"alertReachable"`
-	Version        string   `json:"version,omitempty"`
-	Container      string   `json:"container"`
-	// HostURL is the node's own asset dashboard as a browser on the host can reach it.
-	// Static config, so it stays set even while the node is unreachable.
+	// AlertSource is "node" (teranode's embedded alert service) or "sidecar" (a go-alert-system
+	// process applying alerts to an SV node over RPC).
+	AlertSource      string `json:"alertSource,omitempty"`
+	AlertUnprocessed int    `json:"alertUnprocessed"` // sidecar: alerts whose RPC apply failed; -1 unknown
+	SidecarURL       string `json:"sidecarURL,omitempty"`
+	SidecarContainer string `json:"sidecarContainer,omitempty"`
+	Version          string `json:"version,omitempty"`
+	Container        string `json:"container"`
+	// HostURL is the node's own asset dashboard as a browser on the host can reach it
+	// (teranodes only). Static config, so it stays set even while the node is unreachable.
 	HostURL    string    `json:"hostURL,omitempty"`
 	Partitions []string  `json:"partitions,omitempty"` // planes currently disconnected: p2p, alert
 	Error      string    `json:"error,omitempty"`
@@ -117,14 +126,16 @@ type Snapshot struct {
 
 // Fleet polls the stack and maintains the Snapshot, publishing change events on the Bus.
 type Fleet struct {
-	inv    *topology.Inventory
-	bus    *Bus
-	lg     *slog.Logger
-	alert  *alerts.Host
-	rpc    map[string]*teranode.RPCClient
-	asset  map[string]*teranode.AssetClient
-	hub    *alerts.HubClient
-	arcade *arcade.Client
+	inv     *topology.Inventory
+	bus     *Bus
+	lg      *slog.Logger
+	alert   *alerts.Host
+	rpc     map[string]*teranode.RPCClient
+	asset   map[string]*teranode.AssetClient // teranodes only
+	sv      map[string]*svnode.Client        // SV nodes only
+	sidecar map[string]*alerts.HubClient     // SV nodes' go-alert-system sidecars
+	hub     *alerts.HubClient
+	arcade  *arcade.Client
 
 	mu       sync.RWMutex
 	snap     Snapshot
@@ -137,17 +148,27 @@ type Fleet struct {
 // NewFleet builds the observer. alertHost may be nil (alert sequence probing disabled).
 func NewFleet(inv *topology.Inventory, bus *Bus, alertHost *alerts.Host, lg *slog.Logger) *Fleet {
 	f := &Fleet{inv: inv, bus: bus, lg: lg, alert: alertHost, rpc: map[string]*teranode.RPCClient{},
-		asset: map[string]*teranode.AssetClient{}, watched: map[string]*OutpointState{}, partSet: map[string]map[string]bool{},
-		interval: time.Second}
+		asset: map[string]*teranode.AssetClient{}, sv: map[string]*svnode.Client{}, sidecar: map[string]*alerts.HubClient{},
+		watched: map[string]*OutpointState{}, partSet: map[string]map[string]bool{}, interval: time.Second}
 	for _, n := range inv.Nodes {
 		f.rpc[n.Name] = teranode.NewRPCClient(n.RPCURL, inv.RPCUser, inv.RPCPass)
-		f.asset[n.Name] = teranode.NewAssetClient(n.AssetURL)
-		// The dashboard is served at the asset origin, and HostAssetURL points at /api/v1
-		// beneath it. HostAssetURL rather than AssetURL: UseHostURLs rewrites AssetURL to the
-		// host URL in -host-mode but leaves HostAssetURL alone, so only HostAssetURL is
-		// browser-correct in both modes — AssetURL is a ctlnet IP when we run in-container.
-		f.snap.Nodes = append(f.snap.Nodes, NodeState{Name: n.Name, Index: n.Index, Container: n.Container,
-			AlertSeq: -1, HostURL: strings.TrimSuffix(n.HostAssetURL, "/api/v1")})
+		st := NodeState{Kind: "teranode", Name: n.Name, Index: n.Index, Container: n.Container, AlertSeq: -1, AlertUnprocessed: -1, AlertSource: "node"}
+		if n.IsSV() {
+			f.sv[n.Name] = svnode.New(n.RPCURL, inv.RPCUser, inv.RPCPass)
+			st.Kind, st.AlertSource = "svnode", "sidecar"
+			if n.Sidecar != nil {
+				f.sidecar[n.Name] = alerts.NewHubClient(n.Sidecar.APIURL)
+				st.SidecarURL, st.SidecarContainer = n.Sidecar.HostAPI, n.Sidecar.Container
+			}
+		} else {
+			f.asset[n.Name] = teranode.NewAssetClient(n.AssetURL)
+			// The dashboard is served at the asset origin, and HostAssetURL points at /api/v1
+			// beneath it. HostAssetURL rather than AssetURL: UseHostURLs rewrites AssetURL to the
+			// host URL in -host-mode but leaves HostAssetURL alone, so only HostAssetURL is
+			// browser-correct in both modes — AssetURL is a ctlnet IP when we run in-container.
+			st.HostURL = strings.TrimSuffix(n.HostAssetURL, "/api/v1")
+		}
+		f.snap.Nodes = append(f.snap.Nodes, st)
 	}
 	if inv.Hub != nil {
 		f.hub = alerts.NewHubClient(inv.Hub.APIURL)
@@ -166,8 +187,25 @@ func NewFleet(inv *topology.Inventory, bus *Bus, alertHost *alerts.Host, lg *slo
 // RPC returns the RPC client for a node.
 func (f *Fleet) RPC(node string) *teranode.RPCClient { return f.rpc[node] }
 
-// Asset returns the asset client for a node.
+// Asset returns the asset client for a teranode, nil for SV nodes.
 func (f *Fleet) Asset(node string) *teranode.AssetClient { return f.asset[node] }
+
+// SV returns the SV Node client for an SV node, nil for teranodes.
+func (f *Fleet) SV(node string) *svnode.Client { return f.sv[node] }
+
+// IsSV reports whether the node is an SV node.
+func (f *Fleet) IsSV(node string) bool { return f.sv[node] != nil }
+
+// Tip returns a node's best header live: asset API for teranodes, RPC for SV nodes.
+func (f *Fleet) Tip(ctx context.Context, node string) (*teranode.BlockHeader, error) {
+	if c := f.sv[node]; c != nil {
+		return c.BestBlockHeader(ctx)
+	}
+	if a := f.asset[node]; a != nil {
+		return a.BestBlockHeader(ctx)
+	}
+	return nil, fmt.Errorf("unknown node %q", node)
+}
 
 // Snapshot returns a copy of the current view.
 func (f *Fleet) Snapshot() Snapshot {
@@ -332,7 +370,14 @@ func (f *Fleet) pollAlertSeqs(ctx context.Context) {
 // and records it in the watched set.
 func (f *Fleet) Refresh(ctx context.Context, node, txid string, vout uint32) (OutpointView, error) {
 	f.Watch(txid, vout, "")
-	outs, err := f.asset[node].UTXOs(ctx, txid)
+	if f.sv[node] != nil {
+		return f.refreshSV(ctx, node, txid, vout)
+	}
+	a := f.asset[node]
+	if a == nil {
+		return OutpointView{Status: "ERROR", Error: "unknown node"}, fmt.Errorf("unknown node %q", node)
+	}
+	outs, err := a.UTXOs(ctx, txid)
 	if err != nil {
 		return OutpointView{Status: "ERROR", Error: err.Error()}, err
 	}
@@ -345,6 +390,49 @@ func (f *Fleet) Refresh(ctx context.Context, node, txid string, vout uint32) (Ou
 			}
 		}
 	}
+	f.record(node, txid, vout, v)
+	return v, nil
+}
+
+// refreshSV derives an outpoint's state on an SV node from gettxout (unspent → OK, and
+// FROZEN when the consensus blacklist covers it at the next height), getrawtransaction
+// (known but spent → SPENT) and otherwise NOT_FOUND.
+func (f *Fleet) refreshSV(ctx context.Context, node, txid string, vout uint32) (OutpointView, error) {
+	c := f.sv[node]
+	out, err := c.TxOut(ctx, txid, vout)
+	if err != nil {
+		return OutpointView{Status: "ERROR", Error: err.Error()}, err
+	}
+	v := OutpointView{Status: "NOT_FOUND"}
+	if out != nil {
+		v = OutpointView{Status: "OK", Satoshis: svnode.Satoshis(out.Value)}
+		if frozen, ferr := f.SVFrozen(ctx, node, txid, vout); ferr == nil && frozen {
+			v.Status = "FROZEN"
+		}
+	} else if _, rerr := c.RawTransaction(ctx, txid); rerr == nil {
+		v.Status = "SPENT"
+	}
+	f.record(node, txid, vout, v)
+	return v, nil
+}
+
+// SVFrozen reports whether an SV node's consensus blacklist covers the outpoint at the
+// height its next block would have.
+func (f *Fleet) SVFrozen(ctx context.Context, node, txid string, vout uint32) (bool, error) {
+	c := f.sv[node]
+	if c == nil {
+		return false, fmt.Errorf("%s is not an SV node", node)
+	}
+	funds, err := c.QueryBlacklist(ctx)
+	if err != nil {
+		return false, err
+	}
+	st, _ := f.Node(node)
+	return svnode.FrozenAt(funds, txid, vout, uint64(st.Height)+1), nil
+}
+
+// record stores an outpoint view and publishes a utxo event when the status changed.
+func (f *Fleet) record(node, txid string, vout uint32, v OutpointView) {
 	f.mu.Lock()
 	if cur, ok := f.watched[fmt.Sprintf("%s:%d", txid, vout)]; ok {
 		if old, had := cur.PerNode[node]; !had || old.Status != v.Status {
@@ -354,7 +442,6 @@ func (f *Fleet) Refresh(ctx context.Context, node, txid string, vout uint32) (Ou
 		cur.PerNode[node] = v
 	}
 	f.mu.Unlock()
-	return v, nil
 }
 
 func (f *Fleet) pollNodes(ctx context.Context, probeAlerts bool) {
@@ -371,6 +458,10 @@ func (f *Fleet) pollNodes(ctx context.Context, probeAlerts bool) {
 }
 
 func (f *Fleet) pollNode(ctx context.Context, node topology.Node, probeAlerts bool) {
+	if f.sv[node.Name] != nil {
+		f.pollSVNode(ctx, node)
+		return
+	}
 	cctx, cancel := context.WithTimeout(ctx, 4*time.Second)
 	defer cancel()
 	prev, _ := f.Node(node.Name)
@@ -418,6 +509,62 @@ func (f *Fleet) pollNode(ctx context.Context, node topology.Node, probeAlerts bo
 	for i := range f.snap.Nodes {
 		if f.snap.Nodes[i].Name == node.Name {
 			// keep the alert fields maintained by pollAlertSeqs
+			st.AlertSeq, st.AlertReachable = f.snap.Nodes[i].AlertSeq, f.snap.Nodes[i].AlertReachable
+			f.snap.Nodes[i] = st
+		}
+	}
+	f.snap.UpdatedAt = time.Now().UTC()
+	f.mu.Unlock()
+}
+
+// pollSVNode observes an SV node over RPC (tip, mempool, peers, version) and its alert
+// sidecar's health (unprocessed alerts = RPC applies that failed).
+func (f *Fleet) pollSVNode(ctx context.Context, node topology.Node) {
+	cctx, cancel := context.WithTimeout(ctx, 4*time.Second)
+	defer cancel()
+	c := f.sv[node.Name]
+	prev, _ := f.Node(node.Name)
+	st := prev
+	st.Name, st.Index, st.Container = node.Name, node.Index, node.Container
+	st.UpdatedAt = time.Now().UTC()
+	st.Partitions = f.partitions(node.Name)
+
+	hdr, err := c.BestBlockHeader(cctx)
+	if err != nil {
+		st.Reachable = false
+		st.Error = err.Error()
+	} else {
+		st.Reachable = true
+		st.Error = ""
+		if hdr.Hash != prev.Tip {
+			f.bus.Publish("tip", node.Name, fmt.Sprintf("%s tip → %d %s", node.Name, hdr.Height, short(hdr.Hash)),
+				map[string]any{"height": hdr.Height, "hash": hdr.Hash, "prev": prev.Tip})
+		}
+		st.Height, st.Tip = hdr.Height, hdr.Hash
+		if mp, err := c.GetRawMempool(cctx); err == nil {
+			st.MempoolCount = len(mp)
+			if len(mp) > 20 {
+				mp = mp[:20]
+			}
+			st.Mempool = mp
+		}
+		if peers, err := c.PeerInfo(cctx); err == nil {
+			st.Peers = len(peers)
+		}
+		if st.Version == "" {
+			if v, err := c.SubVersion(cctx); err == nil {
+				st.Version = v
+			}
+		}
+	}
+	if sc := f.sidecar[node.Name]; sc != nil {
+		if h, err := sc.Health(cctx); err == nil {
+			st.AlertUnprocessed = h.UnprocessedAlert
+		}
+	}
+	f.mu.Lock()
+	for i := range f.snap.Nodes {
+		if f.snap.Nodes[i].Name == node.Name {
 			st.AlertSeq, st.AlertReachable = f.snap.Nodes[i].AlertSeq, f.snap.Nodes[i].AlertReachable
 			f.snap.Nodes[i] = st
 		}

@@ -70,5 +70,27 @@
         "peer_id": "12D3KooWJG3QRnnoEq5Uvo5ZeLcQHGk5szxaYuAPE8VX2gKyB8rD"
       }
     }
+  },
+  "svnodes": {
+    "svnode1": {
+      "p2p": {
+        "private_key_hex": "",
+        "peer_id": ""
+      },
+      "alert": {
+        "private_key_hex": "1a2a3aef5953da6e0d7eefbe25cd0e226ec97c07cf4db5d210f700924b358a0c9361b6cbd06c6472b278d5148ef709c4f5f90ce26de8eefe54e68f5857a73822",
+        "peer_id": "12D3KooWKjgX4mwRdvEfy751vGCi622fG4apGtdQd5zPhJQauaau"
+      }
+    },
+    "svnode2": {
+      "p2p": {
+        "private_key_hex": "",
+        "peer_id": ""
+      },
+      "alert": {
+        "private_key_hex": "2f3ef5d615243be37935acd4e459f1cd575c889e1626f83f2fa600cf6147ba39e576d4667ec99ec86e9245aee31b03218d27c8b962e1aa83d930d9d404437061",
+        "peer_id": "12D3KooWRG6dDMBqzLdSHqi7FjkzrLsUeddoCHSDDZ5ZQdC2JHv8"
+      }
+    }
   }
 }

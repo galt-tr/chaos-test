@@ -19,8 +19,14 @@ Requirements: the stack is up (`make up`) and `systemctl --user enable --now pod
   (alert log, keyring, runs), `KAFKA_BROKERS`, `SCENARIOS` (mounted from `../scenarios`, re-read
   on every list/run so edits apply live), `-host-mode` (dev on the host against published
   ports; no alert delivery).
-- `internal/observe` — fleet poller (asset API every second), alert-sequence probes, watched
-  outpoints (`/utxos/<txid>/json` → `FROZEN/OK/SPENT`), hub and service health, event bus.
+- `internal/observe` — fleet poller (teranodes: asset API every second; SV nodes: RPC
+  `getblockheader`/`getrawmempool`/`getpeerinfo` plus their alert sidecar's `/health`),
+  alert-sequence probes (a node's `alertAddr`, which for an SV node is its sidecar), watched
+  outpoints (`/utxos/<txid>/json` on teranodes → `FROZEN/OK/SPENT`; `gettxout` +
+  `queryBlacklist` on SV nodes), hub, arcade and service health, event bus. Every node carries
+  a `kind` (`teranode` | `svnode`); the Fleet page renders an SV card with peers instead of
+  FSM and the sidecar's sequence and unprocessed count, and the Chaos page's alert-plane cut
+  targets the sidecar container.
 - `internal/api` — REST + SSE (`/api/events`), key ring (`miner` = the nodes' coinbase key plus
   named victim keys), raw-signer spend/submit (per node or via arcade, Extended Format).
 - `internal/scenario` — YAML scenarios, `${...}` expressions (`tip(A)`, `latest`, vars,

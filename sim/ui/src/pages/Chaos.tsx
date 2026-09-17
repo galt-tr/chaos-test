@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { api, type NodeState } from '../api';
+import { api, isSV, type NodeState } from '../api';
 import { useLiveCtx } from '../live';
 import { useActions } from '../hooks';
 import { EventFeed } from './Fleet';
@@ -30,6 +30,7 @@ function NodeChaos({ n, status, run }: { n: NodeState; status: Runner['status'];
   const [blocks, setBlocks] = useState('1');
   const [address, setAddress] = useState('');
   const k = (s: string) => `${s}:${n.name}`;
+  const sv = isSV(n);
 
   const partition = (plane: 'alert' | 'p2p', on: boolean) =>
     run(k(`part-${plane}`), () => api.partition(n.name, plane, on), () => (on ? `${plane} plane disconnected` : `${plane} plane reconnected`));
@@ -44,22 +45,22 @@ function NodeChaos({ n, status, run }: { n: NodeState; status: Runner['status'];
   return (
     <div className={`panel node ${n.reachable ? '' : 'down'}`}>
       <div className="row between">
-        <h2 style={{ margin: 0 }}>{n.name}</h2>
+        <h2 style={{ margin: 0 }}>{n.name} {sv && <span className="muted lower">SV Node</span>}</h2>
         <span className="row">
           {parts.map((p) => <Pill key={p} ok={false}>{p} plane cut</Pill>)}
           <Pill ok={n.reachable}>{n.reachable ? 'reachable' : 'unreachable'}</Pill>
-          <span className={`small ${n.fsm === 'RUNNING' ? 'ok' : 'warn'}`}>{n.fsm || 'fsm ?'}</span>
+          {sv ? <span className="small muted">{n.peers ?? 0} peers</span> : <span className={`small ${n.fsm === 'RUNNING' ? 'ok' : 'warn'}`}>{n.fsm || 'fsm ?'}</span>}
         </span>
       </div>
-      <div className="small muted" style={{ marginTop: 4 }}>height {n.height} · <Tip hash={n.tip} n={8} /> · mempool {n.mempoolCount} · alert #{n.alertSeq < 0 ? 'n/a' : n.alertSeq} · <code>{n.container}</code></div>
+      <div className="small muted" style={{ marginTop: 4 }}>height {n.height} · <Tip hash={n.tip} n={8} /> · mempool {n.mempoolCount} · alert #{n.alertSeq < 0 ? 'n/a' : n.alertSeq}{sv ? ' (sidecar)' : ''} · <code>{n.container}</code>{sv && n.sidecarContainer ? <> + <code>{n.sidecarContainer}</code></> : null}</div>
 
       <fieldset>
         <legend>network partitions (podman network disconnect/connect)</legend>
         <div className="row">
-          <span style={{ minWidth: 90 }}>alert plane</span>
+          <span style={{ minWidth: 90 }}>{sv ? 'sidecar alert plane' : 'alert plane'}</span>
           {alertCut
             ? <button onClick={() => partition('alert', false)} disabled={status[k('part-alert')]?.busy}>heal alert plane</button>
-            : <button className="danger" onClick={() => partition('alert', true)} disabled={status[k('part-alert')]?.busy}>cut alert plane</button>}
+            : <button className="danger" onClick={() => partition('alert', true)} disabled={status[k('part-alert')]?.busy} title={sv ? 'disconnects the go-alert-system sidecar from alertnet; the SV node itself has no alert p2p' : undefined}>{sv ? 'cut sidecar alert plane' : 'cut alert plane'}</button>}
           <span className={`small ${alertCut ? 'bad' : 'ok'}`}>{alertCut ? 'disconnected from alertnet' : 'connected'}</span>
           <Status st={status[k('part-alert')]} />
         </div>
@@ -92,7 +93,7 @@ function NodeChaos({ n, status, run }: { n: NodeState; status: Runner['status'];
         <Status st={status[k('container')]} />
       </fieldset>
 
-      <fieldset>
+      {!sv && <fieldset>
         <legend>mine (RPC generate / generatetoaddress)</legend>
         <div className="row">
           <label>blocks<input type="number" min={1} max={1000} value={blocks} onChange={(e) => setBlocks(e.target.value)} style={{ width: 70 }} /></label>
@@ -101,7 +102,7 @@ function NodeChaos({ n, status, run }: { n: NodeState; status: Runner['status'];
         </div>
         <Status st={status[k('mine')]} />
         {status[k('mine')]?.ok && n.tip && <div className="small muted">tip now <Hash h={n.tip} n={8} /> @ {n.height}</div>}
-      </fieldset>
+      </fieldset>}
     </div>
   );
 }
