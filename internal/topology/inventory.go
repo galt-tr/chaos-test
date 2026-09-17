@@ -149,6 +149,11 @@ func (inv *Inventory) UseHostURLs() {
 		if n.HostAssetURL != "" {
 			n.AssetURL = n.HostAssetURL
 		}
+		// The health port is published at hostBase (see cmd/gen). Without this the
+		// health probe would dial the unreachable ctlnet address in -host-mode.
+		if n.HostBase != 0 {
+			n.HealthURL = fmt.Sprintf("http://localhost:%d/health", n.HostBase)
+		}
 	}
 	if inv.Hub != nil && inv.Hub.HostAPI != "" {
 		inv.Hub.APIURL = inv.Hub.HostAPI

@@ -46,7 +46,8 @@ type Deps struct {
 	Runtime   chaos.Runtime
 	Scenarios Scenarios
 	Logger    *slog.Logger
-	Arcade    string // arcade base URL (POST /tx), may be empty
+	Arcade    string    // arcade base URL (POST /tx), may be empty
+	Diag      Diagnoser // nil disables /api/diagnostics
 }
 
 // Server is the HTTP API.
@@ -110,6 +111,8 @@ func New(d Deps) *Server {
 	m.HandleFunc("DELETE /api/watch/{txid}/{vout}", s.deleteWatch)
 	m.HandleFunc("POST /api/chaos/partition", s.postPartition)
 	m.HandleFunc("POST /api/chaos/{action}", s.postChaos)
+	m.HandleFunc("GET /api/logs", s.getLogs)
+	m.HandleFunc("GET /api/diagnostics", s.getDiagnostics)
 	sub, _ := fs.Sub(uiFS, "uidist")
 	fileServer := http.FileServer(http.FS(sub))
 	m.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
@@ -138,13 +141,14 @@ func (s *Server) AlertLatest() uint32 { return s.d.AlertLog.Latest() }
 func (s *Server) NewKey(name, note string) (*KeyEntry, error) { return s.d.Keys.New(name, note) }
 
 // Chaos runs a container action (pause, unpause, stop, start) on a node.
-// Logs returns a node container's logs written since `since` (zero = everything).
-func (s *Server) Logs(ctx context.Context, node string, since time.Time) (string, error) {
+// Logs returns a window of a node container's log. Shared by the /api/logs handler and
+// the scenario engine's log_count assertion.
+func (s *Server) Logs(ctx context.Context, node string, opt chaos.LogOptions) (chaos.LogResult, error) {
 	n, err := s.node(node)
 	if err != nil {
-		return "", err
+		return chaos.LogResult{}, err
 	}
-	return s.d.Runtime.Logs(ctx, n.Container, since)
+	return s.d.Runtime.Logs(ctx, n.Container, opt)
 }
 
 func (s *Server) Chaos(ctx context.Context, node, action string) error {
@@ -214,11 +218,20 @@ func (s *Server) getInventory(w http.ResponseWriter, _ *http.Request) {
 
 func (s *Server) getState(w http.ResponseWriter, _ *http.Request) {
 	snap := s.d.Fleet.Snapshot()
+	kind := s.d.Runtime.Kind()
+	// Advertised so the Logs page can render its unavailable state without first making a
+	// request it knows will fail.
+	logsInfo := map[string]any{"available": kind != "none", "runtime": kind}
+	if kind == "none" {
+		logsInfo["reason"] = reasonNoRuntime
+	}
 	writeJSON(w, 200, map[string]any{
 		"snapshot":  snap,
 		"alerts":    s.alertSummaries(),
-		"runtime":   s.d.Runtime.Kind(),
+		"runtime":   kind,
 		"alertHost": s.d.AlertHost != nil,
+		"logs":      logsInfo,
+		"diag":      s.d.Diag != nil,
 	})
 }
 

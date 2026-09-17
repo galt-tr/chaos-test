@@ -6,6 +6,7 @@ import (
 	"log/slog"
 	"net/url"
 	"sort"
+	"strings"
 	"sync"
 	"time"
 
@@ -17,21 +18,24 @@ import (
 
 // NodeState is the harness's current view of one teranode.
 type NodeState struct {
-	Name           string    `json:"name"`
-	Index          int       `json:"index"`
-	Reachable      bool      `json:"reachable"`
-	Height         uint32    `json:"height"`
-	Tip            string    `json:"tip"`
-	FSM            string    `json:"fsm"`
-	MempoolCount   int       `json:"mempoolCount"`
-	Mempool        []string  `json:"mempool,omitempty"`
-	AlertSeq       int64     `json:"alertSeq"` // -1 = unknown / unreachable
-	AlertReachable bool      `json:"alertReachable"`
-	Version        string    `json:"version,omitempty"`
-	Container      string    `json:"container"`
-	Partitions     []string  `json:"partitions,omitempty"` // planes currently disconnected: p2p, alert
-	Error          string    `json:"error,omitempty"`
-	UpdatedAt      time.Time `json:"updatedAt"`
+	Name           string   `json:"name"`
+	Index          int      `json:"index"`
+	Reachable      bool     `json:"reachable"`
+	Height         uint32   `json:"height"`
+	Tip            string   `json:"tip"`
+	FSM            string   `json:"fsm"`
+	MempoolCount   int      `json:"mempoolCount"`
+	Mempool        []string `json:"mempool,omitempty"`
+	AlertSeq       int64    `json:"alertSeq"` // -1 = unknown / unreachable
+	AlertReachable bool     `json:"alertReachable"`
+	Version        string   `json:"version,omitempty"`
+	Container      string   `json:"container"`
+	// HostURL is the node's own asset dashboard as a browser on the host can reach it.
+	// Static config, so it stays set even while the node is unreachable.
+	HostURL    string    `json:"hostURL,omitempty"`
+	Partitions []string  `json:"partitions,omitempty"` // planes currently disconnected: p2p, alert
+	Error      string    `json:"error,omitempty"`
+	UpdatedAt  time.Time `json:"updatedAt"`
 }
 
 // HubState is the go-alert-system node's view.
@@ -138,7 +142,12 @@ func NewFleet(inv *topology.Inventory, bus *Bus, alertHost *alerts.Host, lg *slo
 	for _, n := range inv.Nodes {
 		f.rpc[n.Name] = teranode.NewRPCClient(n.RPCURL, inv.RPCUser, inv.RPCPass)
 		f.asset[n.Name] = teranode.NewAssetClient(n.AssetURL)
-		f.snap.Nodes = append(f.snap.Nodes, NodeState{Name: n.Name, Index: n.Index, Container: n.Container, AlertSeq: -1})
+		// The dashboard is served at the asset origin, and HostAssetURL points at /api/v1
+		// beneath it. HostAssetURL rather than AssetURL: UseHostURLs rewrites AssetURL to the
+		// host URL in -host-mode but leaves HostAssetURL alone, so only HostAssetURL is
+		// browser-correct in both modes — AssetURL is a ctlnet IP when we run in-container.
+		f.snap.Nodes = append(f.snap.Nodes, NodeState{Name: n.Name, Index: n.Index, Container: n.Container,
+			AlertSeq: -1, HostURL: strings.TrimSuffix(n.HostAssetURL, "/api/v1")})
 	}
 	if inv.Hub != nil {
 		f.hub = alerts.NewHubClient(inv.Hub.APIURL)

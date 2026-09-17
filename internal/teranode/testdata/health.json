@@ -1,0 +1,828 @@
+{
+  "status": "200",
+  "services": [
+    {
+      "service": "Blockchain",
+      "status": "200",
+      "dependencies": [
+        {
+          "status": "200",
+          "dependencies": [
+            {
+              "resource": "gRPC Server",
+              "status": "200",
+              "error": "<nil>",
+              "message": "gRPC server at 0.0.0.0:8087 is listening and accepting requests"
+            },
+            {
+              "resource": "HTTP Server",
+              "status": "200",
+              "error": "<nil>",
+              "message": "HTTP server at http://localhost:8082 is listening and accepting requests"
+            },
+            {
+              "resource": "Kafka",
+              "status": "200",
+              "error": "<nil>",
+              "message": "Kafka is healthy"
+            },
+            {
+              "resource": "BlockchainStore",
+              "status": "200",
+              "error": "<nil>",
+              "message": "OK"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "service": "P2P",
+      "status": "200",
+      "dependencies": [
+        {
+          "status": "200",
+          "dependencies": [
+            {
+              "resource": "HTTPServer",
+              "status": "200",
+              "error": "<nil>",
+              "message": "OK"
+            },
+            {
+              "resource": "Kafka",
+              "status": "200",
+              "error": "<nil>",
+              "message": "Kafka is healthy"
+            },
+            {
+              "resource": "BlockchainClient",
+              "status": "200",
+              "error": "<nil>",
+              "dependencies": [
+                {
+                  "status": "200",
+                  "dependencies": [
+                    {
+                      "resource": "gRPC Server",
+                      "status": "200",
+                      "error": "<nil>",
+                      "message": "gRPC server at 0.0.0.0:8087 (skipped self-check)"
+                    },
+                    {
+                      "resource": "HTTP Server",
+                      "status": "200",
+                      "error": "<nil>",
+                      "message": "HTTP server at http://localhost:8082 is listening and accepting requests"
+                    },
+                    {
+                      "resource": "Kafka",
+                      "status": "200",
+                      "error": "<nil>",
+                      "message": "Kafka is healthy"
+                    },
+                    {
+                      "resource": "BlockchainStore",
+                      "status": "200",
+                      "error": "<nil>",
+                      "message": "OK"
+                    }
+                  ]
+                }
+              ]
+            },
+            {
+              "resource": "FSM",
+              "status": "200",
+              "error": "<nil>",
+              "message": "RUNNING"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "service": "Asset",
+      "status": "200",
+      "dependencies": [
+        {
+          "status": "200",
+          "dependencies": [
+            {
+              "resource": "HTTP Server",
+              "status": "200",
+              "error": "<nil>",
+              "message": "HTTP server at http://localhost:8090 is listening and accepting requests"
+            },
+            {
+              "resource": "BlockchainClient",
+              "status": "200",
+              "error": "<nil>",
+              "dependencies": [
+                {
+                  "status": "200",
+                  "dependencies": [
+                    {
+                      "resource": "gRPC Server",
+                      "status": "200",
+                      "error": "<nil>",
+                      "message": "gRPC server at 0.0.0.0:8087 (skipped self-check)"
+                    },
+                    {
+                      "resource": "HTTP Server",
+                      "status": "200",
+                      "error": "<nil>",
+                      "message": "HTTP server at http://localhost:8082 is listening and accepting requests"
+                    },
+                    {
+                      "resource": "Kafka",
+                      "status": "200",
+                      "error": "<nil>",
+                      "message": "Kafka is healthy"
+                    },
+                    {
+                      "resource": "BlockchainStore",
+                      "status": "200",
+                      "error": "<nil>",
+                      "message": "OK"
+                    }
+                  ]
+                }
+              ]
+            },
+            {
+              "resource": "FSM",
+              "status": "200",
+              "error": "<nil>",
+              "message": "RUNNING"
+            },
+            {
+              "resource": "UTXOStore",
+              "status": "200",
+              "error": "<nil>",
+              "message": "SQL Engine is sqlite"
+            },
+            {
+              "resource": "TxStore",
+              "status": "200",
+              "error": "<nil>",
+              "message": "Null Store"
+            },
+            {
+              "resource": "BlockPersisterStore",
+              "status": "200",
+              "error": "<nil>",
+              "message": "File Store: Healthy (71.4 GiB available of 708.2 GiB)"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "service": "RPC",
+      "status": "200",
+      "dependencies": [
+        {
+          "status": "200",
+          "dependencies": [
+            {
+              "resource": "BlockchainClient",
+              "status": "200",
+              "error": "<nil>",
+              "dependencies": [
+                {
+                  "status": "200",
+                  "dependencies": [
+                    {
+                      "resource": "gRPC Server",
+                      "status": "200",
+                      "error": "<nil>",
+                      "message": "gRPC server at 0.0.0.0:8087 (skipped self-check)"
+                    },
+                    {
+                      "resource": "HTTP Server",
+                      "status": "200",
+                      "error": "<nil>",
+                      "message": "HTTP server at http://localhost:8082 is listening and accepting requests"
+                    },
+                    {
+                      "resource": "Kafka",
+                      "status": "200",
+                      "error": "<nil>",
+                      "message": "Kafka is healthy"
+                    },
+                    {
+                      "resource": "BlockchainStore",
+                      "status": "200",
+                      "error": "<nil>",
+                      "message": "OK"
+                    }
+                  ]
+                }
+              ]
+            },
+            {
+              "resource": "FSM",
+              "status": "200",
+              "error": "<nil>",
+              "message": "RUNNING"
+            },
+            {
+              "resource": "BlockAssemblyClient",
+              "status": "200",
+              "error": "<nil>",
+              "message": "OK"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "service": "Alert",
+      "status": "200",
+      "dependencies": [
+        {
+          "status": "200",
+          "dependencies": [
+            {
+              "resource": "BlockchainClient",
+              "status": "200",
+              "error": "<nil>",
+              "dependencies": [
+                {
+                  "status": "200",
+                  "dependencies": [
+                    {
+                      "resource": "gRPC Server",
+                      "status": "200",
+                      "error": "<nil>",
+                      "message": "gRPC server at 0.0.0.0:8087 (skipped self-check)"
+                    },
+                    {
+                      "resource": "HTTP Server",
+                      "status": "200",
+                      "error": "<nil>",
+                      "message": "HTTP server at http://localhost:8082 is listening and accepting requests"
+                    },
+                    {
+                      "resource": "Kafka",
+                      "status": "200",
+                      "error": "<nil>",
+                      "message": "Kafka is healthy"
+                    },
+                    {
+                      "resource": "BlockchainStore",
+                      "status": "200",
+                      "error": "<nil>",
+                      "message": "OK"
+                    }
+                  ]
+                }
+              ]
+            },
+            {
+              "resource": "FSM",
+              "status": "200",
+              "error": "<nil>",
+              "message": "RUNNING"
+            },
+            {
+              "resource": "BlockassemblyClient",
+              "status": "200",
+              "error": "<nil>",
+              "message": "OK"
+            },
+            {
+              "resource": "UTXOStore",
+              "status": "200",
+              "error": "<nil>",
+              "message": "SQL Engine is sqlite"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "service": "BlockAssembly",
+      "status": "200",
+      "dependencies": [
+        {
+          "status": "200",
+          "dependencies": [
+            {
+              "resource": "gRPC Server",
+              "status": "200",
+              "error": "<nil>",
+              "message": "gRPC server at :8085 is listening and accepting requests"
+            },
+            {
+              "resource": "BlockchainClient",
+              "status": "200",
+              "error": "<nil>",
+              "dependencies": [
+                {
+                  "status": "200",
+                  "dependencies": [
+                    {
+                      "resource": "gRPC Server",
+                      "status": "200",
+                      "error": "<nil>",
+                      "message": "gRPC server at 0.0.0.0:8087 (skipped self-check)"
+                    },
+                    {
+                      "resource": "HTTP Server",
+                      "status": "200",
+                      "error": "<nil>",
+                      "message": "HTTP server at http://localhost:8082 is listening and accepting requests"
+                    },
+                    {
+                      "resource": "Kafka",
+                      "status": "200",
+                      "error": "<nil>",
+                      "message": "Kafka is healthy"
+                    },
+                    {
+                      "resource": "BlockchainStore",
+                      "status": "200",
+                      "error": "<nil>",
+                      "message": "OK"
+                    }
+                  ]
+                }
+              ]
+            },
+            {
+              "resource": "FSM",
+              "status": "200",
+              "error": "<nil>",
+              "message": "RUNNING"
+            },
+            {
+              "resource": "SubtreeStore",
+              "status": "200",
+              "error": "<nil>",
+              "message": "File Store: Healthy (71.4 GiB available of 708.2 GiB)"
+            },
+            {
+              "resource": "TxStore",
+              "status": "200",
+              "error": "<nil>",
+              "message": "Null Store"
+            },
+            {
+              "resource": "UTXOStore",
+              "status": "200",
+              "error": "<nil>",
+              "message": "SQL Engine is sqlite"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "service": "SubtreeValidation",
+      "status": "200",
+      "dependencies": [
+        {
+          "status": "200",
+          "dependencies": [
+            {
+              "resource": "gRPC Server",
+              "status": "200",
+              "error": "<nil>",
+              "message": "gRPC server at :8086 is listening and accepting requests"
+            },
+            {
+              "resource": "Kafka",
+              "status": "200",
+              "error": "<nil>",
+              "message": "Kafka is healthy"
+            },
+            {
+              "resource": "BlockchainClient",
+              "status": "200",
+              "error": "<nil>",
+              "dependencies": [
+                {
+                  "status": "200",
+                  "dependencies": [
+                    {
+                      "resource": "gRPC Server",
+                      "status": "200",
+                      "error": "<nil>",
+                      "message": "gRPC server at 0.0.0.0:8087 (skipped self-check)"
+                    },
+                    {
+                      "resource": "HTTP Server",
+                      "status": "200",
+                      "error": "<nil>",
+                      "message": "HTTP server at http://localhost:8082 is listening and accepting requests"
+                    },
+                    {
+                      "resource": "Kafka",
+                      "status": "200",
+                      "error": "<nil>",
+                      "message": "Kafka is healthy"
+                    },
+                    {
+                      "resource": "BlockchainStore",
+                      "status": "200",
+                      "error": "<nil>",
+                      "message": "OK"
+                    }
+                  ]
+                }
+              ]
+            },
+            {
+              "resource": "FSM",
+              "status": "200",
+              "error": "<nil>",
+              "message": "RUNNING"
+            },
+            {
+              "resource": "SubtreeStore",
+              "status": "200",
+              "error": "<nil>",
+              "message": "File Store: Healthy (71.4 GiB available of 708.2 GiB)"
+            },
+            {
+              "resource": "UTXOStore",
+              "status": "200",
+              "error": "<nil>",
+              "message": "SQL Engine is sqlite"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "service": "BlockValidation",
+      "status": "200",
+      "dependencies": [
+        {
+          "status": "200",
+          "dependencies": [
+            {
+              "resource": "gRPC Server",
+              "status": "200",
+              "error": "<nil>",
+              "message": "gRPC server at :8088 is listening and accepting requests"
+            },
+            {
+              "resource": "Kafka",
+              "status": "200",
+              "error": "<nil>",
+              "message": "Kafka is healthy"
+            },
+            {
+              "resource": "BlockchainClient",
+              "status": "200",
+              "error": "<nil>",
+              "dependencies": [
+                {
+                  "status": "200",
+                  "dependencies": [
+                    {
+                      "resource": "gRPC Server",
+                      "status": "200",
+                      "error": "<nil>",
+                      "message": "gRPC server at 0.0.0.0:8087 (skipped self-check)"
+                    },
+                    {
+                      "resource": "HTTP Server",
+                      "status": "200",
+                      "error": "<nil>",
+                      "message": "HTTP server at http://localhost:8082 is listening and accepting requests"
+                    },
+                    {
+                      "resource": "Kafka",
+                      "status": "200",
+                      "error": "<nil>",
+                      "message": "Kafka is healthy"
+                    },
+                    {
+                      "resource": "BlockchainStore",
+                      "status": "200",
+                      "error": "<nil>",
+                      "message": "OK"
+                    }
+                  ]
+                }
+              ]
+            },
+            {
+              "resource": "FSM",
+              "status": "200",
+              "error": "<nil>",
+              "message": "RUNNING"
+            },
+            {
+              "resource": "SubtreeStore",
+              "status": "200",
+              "error": "<nil>",
+              "message": "File Store: Healthy (71.4 GiB available of 708.2 GiB)"
+            },
+            {
+              "resource": "TxStore",
+              "status": "200",
+              "error": "<nil>",
+              "message": "Null Store"
+            },
+            {
+              "resource": "UTXOStore",
+              "status": "200",
+              "error": "<nil>",
+              "message": "SQL Engine is sqlite"
+            },
+            {
+              "resource": "CatchupStatus",
+              "status": "200",
+              "error": "<nil>",
+              "message": "active=false, last_time=never, last_success=false, attempts=0, successes=0, rate=0.00"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "service": "Validator",
+      "status": "200",
+      "dependencies": [
+        {
+          "status": "200",
+          "dependencies": [
+            {
+              "resource": "gRPC Server",
+              "status": "200",
+              "error": "<nil>",
+              "message": "gRPC server at :8081 is listening and accepting requests"
+            },
+            {
+              "resource": "HTTP Server",
+              "status": "200",
+              "error": "<nil>",
+              "message": "HTTP server at http://localhost:8834 is listening and accepting requests"
+            },
+            {
+              "resource": "Kafka",
+              "status": "200",
+              "error": "<nil>",
+              "message": "Kafka is not configured - skipping health check"
+            },
+            {
+              "resource": "BlockchainClient",
+              "status": "200",
+              "error": "<nil>",
+              "dependencies": [
+                {
+                  "status": "200",
+                  "dependencies": [
+                    {
+                      "resource": "gRPC Server",
+                      "status": "200",
+                      "error": "<nil>",
+                      "message": "gRPC server at 0.0.0.0:8087 (skipped self-check)"
+                    },
+                    {
+                      "resource": "HTTP Server",
+                      "status": "200",
+                      "error": "<nil>",
+                      "message": "HTTP server at http://localhost:8082 is listening and accepting requests"
+                    },
+                    {
+                      "resource": "Kafka",
+                      "status": "200",
+                      "error": "<nil>",
+                      "message": "Kafka is healthy"
+                    },
+                    {
+                      "resource": "BlockchainStore",
+                      "status": "200",
+                      "error": "<nil>",
+                      "message": "OK"
+                    }
+                  ]
+                }
+              ]
+            },
+            {
+              "resource": "FSM",
+              "status": "200",
+              "error": "<nil>",
+              "message": "RUNNING"
+            },
+            {
+              "resource": "UTXOStore",
+              "status": "200",
+              "error": "<nil>",
+              "message": "SQL Engine is sqlite"
+            },
+            {
+              "resource": "Validator",
+              "status": "200",
+              "error": "<nil>",
+              "dependencies": [
+                {
+                  "status": "200",
+                  "dependencies": [
+                    {
+                      "resource": "Kafka",
+                      "status": "200",
+                      "error": "<nil>",
+                      "message": "Kafka is healthy"
+                    },
+                    {
+                      "resource": "BlockHeight",
+                      "status": "200",
+                      "error": "<nil>",
+                      "message": "BlockHeight: GOOD: 116,"
+                    },
+                    {
+                      "resource": "UTXOStore",
+                      "status": "200",
+                      "error": "<nil>",
+                      "message": "SQL Engine is sqlite"
+                    }
+                  ]
+                }
+              ]
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "service": "Propagation",
+      "status": "200",
+      "dependencies": [
+        {
+          "status": "200",
+          "dependencies": [
+            {
+              "resource": "gRPC Server",
+              "status": "200",
+              "error": "<nil>",
+              "message": "gRPC server at :8084 is listening and accepting requests"
+            },
+            {
+              "resource": "HTTP Server",
+              "status": "200",
+              "error": "<nil>",
+              "message": "HTTP server at http://localhost:8833 is listening and accepting requests"
+            },
+            {
+              "resource": "BlockchainClient",
+              "status": "200",
+              "error": "<nil>",
+              "dependencies": [
+                {
+                  "status": "200",
+                  "dependencies": [
+                    {
+                      "resource": "gRPC Server",
+                      "status": "200",
+                      "error": "<nil>",
+                      "message": "gRPC server at 0.0.0.0:8087 (skipped self-check)"
+                    },
+                    {
+                      "resource": "HTTP Server",
+                      "status": "200",
+                      "error": "<nil>",
+                      "message": "HTTP server at http://localhost:8082 is listening and accepting requests"
+                    },
+                    {
+                      "resource": "Kafka",
+                      "status": "200",
+                      "error": "<nil>",
+                      "message": "Kafka is healthy"
+                    },
+                    {
+                      "resource": "BlockchainStore",
+                      "status": "200",
+                      "error": "<nil>",
+                      "message": "OK"
+                    }
+                  ]
+                }
+              ]
+            },
+            {
+              "resource": "FSM",
+              "status": "200",
+              "error": "<nil>",
+              "message": "RUNNING"
+            },
+            {
+              "resource": "ValidatorClient",
+              "status": "200",
+              "error": "<nil>",
+              "dependencies": [
+                {
+                  "status": "200",
+                  "dependencies": [
+                    {
+                      "resource": "Kafka",
+                      "status": "200",
+                      "error": "<nil>",
+                      "message": "Kafka is healthy"
+                    },
+                    {
+                      "resource": "BlockHeight",
+                      "status": "200",
+                      "error": "<nil>",
+                      "message": "BlockHeight: GOOD: 116,"
+                    },
+                    {
+                      "resource": "UTXOStore",
+                      "status": "200",
+                      "error": "<nil>",
+                      "message": "SQL Engine is sqlite"
+                    }
+                  ]
+                }
+              ]
+            },
+            {
+              "resource": "TxStore",
+              "status": "200",
+              "error": "<nil>",
+              "message": "Null Store"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "service": "Pruner",
+      "status": "200",
+      "dependencies": [
+        {
+          "status": "200",
+          "dependencies": [
+            {
+              "resource": "gRPC Server",
+              "status": "200",
+              "error": "<nil>",
+              "message": "gRPC server at :8096 is listening and accepting requests"
+            },
+            {
+              "resource": "BlockAssemblyClient",
+              "status": "200",
+              "error": "<nil>",
+              "message": "OK"
+            },
+            {
+              "resource": "BlockchainClient",
+              "status": "200",
+              "error": "<nil>",
+              "dependencies": [
+                {
+                  "status": "200",
+                  "dependencies": [
+                    {
+                      "resource": "gRPC Server",
+                      "status": "200",
+                      "error": "<nil>",
+                      "message": "gRPC server at 0.0.0.0:8087 (skipped self-check)"
+                    },
+                    {
+                      "resource": "HTTP Server",
+                      "status": "200",
+                      "error": "<nil>",
+                      "message": "HTTP server at http://localhost:8082 is listening and accepting requests"
+                    },
+                    {
+                      "resource": "Kafka",
+                      "status": "200",
+                      "error": "<nil>",
+                      "message": "Kafka is healthy"
+                    },
+                    {
+                      "resource": "BlockchainStore",
+                      "status": "200",
+                      "error": "<nil>",
+                      "message": "OK"
+                    }
+                  ]
+                }
+              ]
+            },
+            {
+              "resource": "FSM",
+              "status": "200",
+              "error": "<nil>",
+              "message": "RUNNING"
+            },
+            {
+              "resource": "UTXOStore",
+              "status": "200",
+              "error": "<nil>",
+              "message": "SQL Engine is sqlite"
+            }
+          ]
+        }
+      ]
+    }
+  ]
+}

@@ -15,6 +15,7 @@ import (
 	"net/http"
 	"os"
 	"os/exec"
+	"strconv"
 	"strings"
 	"time"
 )
@@ -30,10 +31,30 @@ type Runtime interface {
 	State(ctx context.Context, container string) (string, error)
 	// Networks lists the networks a container is currently attached to.
 	Networks(ctx context.Context, container string) ([]string, error)
-	// Logs returns the container's stdout+stderr written since the given time (zero = all).
-	Logs(ctx context.Context, container string, since time.Time) (string, error)
+	// Logs returns a window of the container's stdout+stderr.
+	Logs(ctx context.Context, container string, opt LogOptions) (LogResult, error)
 	Kind() string
 }
+
+// LogOptions selects a window of a container's log. Since and Tail are alternatives: the
+// runtime applies them in an order that is not contractually specified, so callers pick one.
+type LogOptions struct {
+	Since      time.Time // zero = from the start of the log
+	Tail       int       // >0 = last N lines; ignored when Since is set
+	Timestamps bool      // prefix each line with the runtime's own clock
+	MaxBytes   int       // read ceiling; 0 = DefaultMaxLogBytes
+}
+
+// LogResult is the window, plus what did not fit in it.
+type LogResult struct {
+	Text      string
+	Bytes     int
+	Truncated bool // MaxBytes stopped the read before the end of the window
+}
+
+// DefaultMaxLogBytes bounds a single log read. Teranode writes ~30 lines/s, so an
+// unbounded window on a long-running container is tens of megabytes.
+const DefaultMaxLogBytes = 8 << 20
 
 // New picks the socket API if socketPath (or DOCKER_HOST, or a well-known socket) exists,
 // else the podman/docker CLI, else a runtime that reports its absence.
@@ -153,16 +174,68 @@ func (r *socketRuntime) State(ctx context.Context, c string) (string, error) {
 	return doc.State.Status, nil
 }
 
-func (r *socketRuntime) Logs(ctx context.Context, c string, since time.Time) (string, error) {
-	q := "?stdout=true&stderr=true"
-	if !since.IsZero() {
-		q += fmt.Sprintf("&since=%d.%09d", since.Unix(), since.Nanosecond())
-	}
-	b, err := r.do(ctx, http.MethodGet, "/containers/"+c+"/logs"+q, nil)
+func (r *socketRuntime) Logs(ctx context.Context, c string, opt LogOptions) (LogResult, error) {
+	b, truncated, err := r.getLimited(ctx, "/containers/"+c+"/logs"+logQuery(opt), maxBytes(opt))
 	if err != nil {
-		return "", err
+		return LogResult{}, err
 	}
-	return demuxLogStream(b), nil
+	text := demuxLogStream(b)
+	if truncated {
+		// The read stopped mid-stream, so the final line is very likely a fragment.
+		// Dropping it is better than handing the parser half a record.
+		if i := strings.LastIndexByte(text, '\n'); i >= 0 {
+			text = text[:i+1]
+		}
+	}
+	return LogResult{Text: text, Bytes: len(b), Truncated: truncated}, nil
+}
+
+// logQuery builds the log query string. Exactly one of tail/since is ever emitted.
+func logQuery(opt LogOptions) string {
+	q := "?stdout=true&stderr=true"
+	if opt.Timestamps {
+		q += "&timestamps=true"
+	}
+	switch {
+	case !opt.Since.IsZero():
+		q += fmt.Sprintf("&since=%d.%09d", opt.Since.Unix(), opt.Since.Nanosecond())
+	case opt.Tail > 0:
+		q += fmt.Sprintf("&tail=%d", opt.Tail)
+	}
+	return q
+}
+
+func maxBytes(opt LogOptions) int {
+	if opt.MaxBytes > 0 {
+		return opt.MaxBytes
+	}
+	return DefaultMaxLogBytes
+}
+
+// getLimited reads at most max bytes, reporting whether the body was longer. The runtime
+// streams oldest-first, so hitting the ceiling loses the NEWEST lines — which is why the
+// caller must not advance its cursor past what it actually parsed.
+func (r *socketRuntime) getLimited(ctx context.Context, path string, max int) ([]byte, bool, error) {
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, "http://d/v1.41"+path, nil)
+	if err != nil {
+		return nil, false, err
+	}
+	resp, err := r.http.Do(req)
+	if err != nil {
+		return nil, false, err
+	}
+	defer resp.Body.Close()
+	b, err := io.ReadAll(io.LimitReader(resp.Body, int64(max)+1))
+	if err != nil {
+		return nil, false, err
+	}
+	if resp.StatusCode >= 300 {
+		return b, false, fmt.Errorf("GET %s: HTTP %d: %s", path, resp.StatusCode, strings.TrimSpace(string(b)))
+	}
+	if len(b) > max {
+		return b[:max], true, nil
+	}
+	return b, false, nil
 }
 
 // demuxLogStream strips the 8-byte frame headers of Docker's multiplexed log stream
@@ -258,12 +331,35 @@ func (r *cliRuntime) State(ctx context.Context, c string) (string, error) {
 	return r.run(ctx, "inspect", "-f", "{{.State.Status}}", c)
 }
 
-func (r *cliRuntime) Logs(ctx context.Context, c string, since time.Time) (string, error) {
+func (r *cliRuntime) Logs(ctx context.Context, c string, opt LogOptions) (LogResult, error) {
 	args := []string{"logs"}
-	if !since.IsZero() {
-		args = append(args, "--since", since.UTC().Format(time.RFC3339Nano))
+	if opt.Timestamps {
+		args = append(args, "--timestamps")
 	}
-	return r.run(ctx, append(args, c)...)
+	switch {
+	case !opt.Since.IsZero():
+		args = append(args, "--since", opt.Since.UTC().Format(time.RFC3339Nano))
+	case opt.Tail > 0:
+		args = append(args, "--tail", strconv.Itoa(opt.Tail))
+	}
+	// Deliberately not r.run: that merges stderr into stdout, which would splice the
+	// runtime's own diagnostics into the container's log as phantom lines.
+	cmd := exec.CommandContext(ctx, r.bin, append(args, c)...)
+	var stdout, stderr bytes.Buffer
+	cmd.Stdout, cmd.Stderr = &stdout, &stderr
+	if err := cmd.Run(); err != nil {
+		return LogResult{}, fmt.Errorf("%s logs %s: %w: %s", r.bin, c, err, strings.TrimSpace(stderr.String()))
+	}
+	text := stdout.String()
+	max := maxBytes(opt)
+	truncated := len(text) > max
+	if truncated {
+		text = text[len(text)-max:]
+		if i := strings.IndexByte(text, '\n'); i >= 0 {
+			text = text[i+1:]
+		}
+	}
+	return LogResult{Text: text, Bytes: stdout.Len(), Truncated: truncated}, nil
 }
 
 func (r *cliRuntime) Networks(ctx context.Context, c string) ([]string, error) {
@@ -276,7 +372,11 @@ func (r *cliRuntime) Networks(ctx context.Context, c string) ([]string, error) {
 
 type noRuntime struct{}
 
-var errNoRuntime = errors.New("no container runtime available (mount the podman socket or install podman)")
+// ErrNoRuntime is returned by every operation when no container engine could be found.
+// Callers match it with errors.Is to report the cause precisely rather than by string.
+var ErrNoRuntime = errors.New("no container runtime available (mount the podman socket or install podman)")
+
+var errNoRuntime = ErrNoRuntime
 
 func (noRuntime) Kind() string                                                 { return "none" }
 func (noRuntime) NetworkDisconnect(context.Context, string, string) error      { return errNoRuntime }
@@ -287,4 +387,6 @@ func (noRuntime) Stop(context.Context, string) error                           {
 func (noRuntime) Start(context.Context, string) error                          { return errNoRuntime }
 func (noRuntime) State(context.Context, string) (string, error)                { return "", errNoRuntime }
 func (noRuntime) Networks(context.Context, string) ([]string, error)           { return nil, errNoRuntime }
-func (noRuntime) Logs(context.Context, string, time.Time) (string, error)      { return "", errNoRuntime }
+func (noRuntime) Logs(context.Context, string, LogOptions) (LogResult, error) {
+	return LogResult{}, errNoRuntime
+}

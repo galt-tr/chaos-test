@@ -25,6 +25,7 @@ import (
 	"github.com/bsv-blockchain/chaos-test/internal/alerts"
 	"github.com/bsv-blockchain/chaos-test/internal/api"
 	"github.com/bsv-blockchain/chaos-test/internal/chaos"
+	"github.com/bsv-blockchain/chaos-test/internal/diag"
 	"github.com/bsv-blockchain/chaos-test/internal/keys"
 	"github.com/bsv-blockchain/chaos-test/internal/observe"
 	"github.com/bsv-blockchain/chaos-test/internal/scenario"
@@ -127,8 +128,9 @@ func run(ctx context.Context, lg *slog.Logger, invPath, keysPath, dataDir, liste
 	if s, ok := inv.Services["arcade"]; ok {
 		arcadeURL = s.URL
 	}
+	dg := diag.New(diag.Deps{Inv: inv, Fleet: fleet, Runtime: rt})
 	srv := api.New(api.Deps{Inventory: inv, Bus: bus, Fleet: fleet, AlertLog: alog, AlertHost: host, Signing: signing, Genesis: genesisPubs,
-		Keys: ring, Runtime: rt, Logger: lg, Arcade: arcadeURL})
+		Keys: ring, Runtime: rt, Logger: lg, Arcade: arcadeURL, Diag: dg})
 
 	eng := scenario.NewEngine(scenario.Deps{Inventory: inv, Bus: bus, Fleet: fleet, API: srv, Logger: lg, RunsDir: filepath.Join(dataDir, "runs")})
 	if err := eng.LoadDir(scenariosDir); err != nil {

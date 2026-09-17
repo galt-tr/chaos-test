@@ -11,6 +11,7 @@ import (
 
 	"github.com/bsv-blockchain/chaos-test/internal/alerts"
 	"github.com/bsv-blockchain/chaos-test/internal/api"
+	"github.com/bsv-blockchain/chaos-test/internal/chaos"
 	"github.com/bsv-blockchain/chaos-test/internal/teranode"
 )
 
@@ -613,13 +614,17 @@ func (x *executor) check(ctx context.Context, name string, w map[string]any, sin
 				return false, "bad pattern: " + err.Error()
 			}
 		}
+		truncated := false
 		count := func() (int, error) {
-			out, err := x.e.d.API.Logs(ctx, node, since)
+			// A generous ceiling: an assertion counting over a long window must not
+			// silently undercount. Truncation is surfaced in the failure detail below.
+			res, err := x.e.d.API.Logs(ctx, node, chaos.LogOptions{Since: since, MaxBytes: 32 << 20})
 			if err != nil {
 				return 0, err
 			}
+			truncated = res.Truncated
 			n := 0
-			for _, line := range strings.Split(out, "\n") {
+			for _, line := range strings.Split(res.Text, "\n") {
 				if c := str(w, "contains"); c != "" && !strings.Contains(line, c) {
 					continue
 				}
@@ -640,20 +645,20 @@ func (x *executor) check(ctx context.Context, name string, w map[string]any, sin
 				return false, err.Error()
 			}
 			max := num(w, "max", 0)
-			return int64(n) <= max, fmt.Sprintf("%d matching log line(s) on %s in %s (allowed ≤ %d)", n, node, window, max)
+			return int64(n) <= max, fmt.Sprintf("%d matching log line(s) on %s in %s (allowed ≤ %d)%s", n, node, window, max, truncNote(truncated))
 		}
 		min := num(w, "min", 1)
 		deadline := time.Now().Add(window)
 		for {
 			n, err := count()
 			if err == nil && int64(n) >= min {
-				return true, fmt.Sprintf("%d matching log line(s) on %s (want ≥ %d)", n, node, min)
+				return true, fmt.Sprintf("%d matching log line(s) on %s (want ≥ %d)%s", n, node, min, truncNote(truncated))
 			}
 			if time.Now().After(deadline) || ctx.Err() != nil {
 				if err != nil {
 					return false, err.Error()
 				}
-				return false, fmt.Sprintf("%d matching log line(s) on %s in %s (want ≥ %d)", n, node, window, min)
+				return false, fmt.Sprintf("%d matching log line(s) on %s in %s (want ≥ %d)%s", n, node, window, min, truncNote(truncated))
 			}
 			select {
 			case <-time.After(time.Second):
@@ -745,4 +750,13 @@ func (x *executor) trackPartition(node, plane string, on bool) {
 	} else {
 		x.r.OpenPartitions[node] = kept
 	}
+}
+
+// truncNote marks a count taken from a log window that hit the read ceiling, so a capped
+// read is never mistaken for an exhaustive count.
+func truncNote(truncated bool) string {
+	if truncated {
+		return " (log window truncated; count is a lower bound)"
+	}
+	return ""
 }
