@@ -9,7 +9,7 @@ Two independent layers:
 
 | layer | what | how to run |
 |---|---|---|
-| [`stack/`](stack/README.md) | standalone, fully private regtest network: N teranodes (built from a teranode ref + a small alert-P2P settings patch), Redpanda, go-alert-system hub, arcade, merkle-service, wallet-infra, tools | `make build && make gen && make up` |
+| [`stack/`](stack/README.md) | standalone, fully private regtest network: N teranodes (built from a teranode ref + three small patches), SV SV Node instances following them over teranode's legacy service with go-alert-system sidecars, Redpanda, go-alert-system hub, arcade, merkle-service, wallet-infra, tools | `make build && make gen && make up` |
 | [`sim/`](sim/) | orchestrator (Go) + React UI that attaches to the running stack: fleet view (nodes, alert hub, arcade with its chaintracks tip), alert builder/delivery, chain & UTXO view, chaos, scenarios; every txid opens in arcade | `make sim-build && make sim-up` → http://localhost:8600 |
 
 Nothing needs the internet at run time. Everything (keys, IPs, images) is pinned.
@@ -24,8 +24,8 @@ merkle-service, wallet, tools), then drive it with `stack/scripts/*` and the `al
 ```bash
 systemctl --user enable --now podman.socket   # chaos actions (partitions) use the podman API
 make build           # tools image, go-alert-system hub, patched teranode (first time 10-20 min)
-make gen N=3         # stack/compose.yaml + stack/config (keys created once)
-make up && make wait # nodes, kafka, hub, arcade, merkle-service, wallet-infra, tools (stack only: stop here)
+make gen N=3 SV=2    # stack/compose.yaml + stack/config (keys created once); SV=0 for teranodes only
+make up && make wait # teranodes, SV nodes + alert sidecars, kafka, hub, arcade, merkle-service, wallet-infra, tools (stack only: stop here)
 make sim-build && make sim-up         # optional: orchestrator + GUI (needs the podman socket)
 open http://localhost:8600            # GUI (or `cd sim/ui && npm run dev` for live UI dev on :5173)
 ```
@@ -105,6 +105,6 @@ cmd/gen          stack generator          cmd/alertctl   alert CLI (build/sign/p
 cmd/stackctl     mine/spend/submit CLI    cmd/orchestrator  simulator backend
 internal/alerts  alert wire format, sync-stream host, gossip participant, hub client
 internal/observe fleet observer + event bus   internal/scenario  engine   internal/api  REST/SSE + UI
-internal/teranode RPC/asset/Kafka clients  internal/chaos  podman runtime   internal/wallet raw signer
+internal/teranode RPC/asset/Kafka clients  internal/svnode  SV Node RPC client  internal/chaos  podman runtime   internal/wallet raw signer
 scenarios/       scenario YAML             docs/upstream/  findings for upstream repos
 ```
