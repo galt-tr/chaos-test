@@ -1,0 +1,20 @@
+2026-09-17T05:19:51Z | DEBUG | services/rpc/Server.go:1126      | rpc   | jsonRPCRead body: {"id":"chaos","jsonrpc":"1.0","method":"generate","params":[2]}
+2026-09-17T05:19:51Z | INFO  | services/rpc/handlers.go:968     | rpc   | [handleGenerate] called for 2 blocks
+2026-09-17T05:19:51Z | INFO  | blockassembly/Server.go:2515     | blockassembly| [generateBlocks] called
+2026-09-17T05:19:51Z | INFO  | blockassembly/Server.go:1562     | blockassembly| [GetMiningCandidate] called
+2026-09-17T05:19:51Z | DEBUG | BlockAssembler.go:1697           | blockassembly| [GetMiningCandidate] called
+2026-09-17T05:19:51Z | DEBUG | BlockAssembler.go:1847           | blockassembly| [GetMiningCandidate] Returning mining candidate: height=828, fees=500, subsidy=156250000, txCount=1, subtreeCount=1
+2026-09-17T05:19:51Z | DEBUG | BlockAssembler.go:1849           | blockassembly| [GetMiningCandidate] called DONE in 49.316832ms
+2026-09-17T05:19:51Z | DEBUG | blockassembly/Server.go:1585     | blockassembly| in GetMiningCandidate: miningCandidate: Mining Candidate (2 transactions)
+2026-09-17T05:19:51Z | INFO  | blockassembly/Server.go:1602     | blockassembly| [GetMiningCandidate][c9154fa86c84ad17aa6798a870bb353a1c192174d718d914a4a1ee14159cac25] returning mining candidate with 2 transactions, 1 subtrees, total size 272 bytes
+2026-09-17T05:19:51Z | INFO  | blockassembly/Server.go:1609     | blockassembly| [GetMiningCandidate] called DONE in 49.40767ms
+2026-09-17T05:19:51Z | INFO  | teranode/model/Block.go:743      | blockassembly| [Block:Valid] called for 3ea891a329c5d88c52288299d7fec673934ed31ecedde555e6cd0384b87df790
+2026-09-17T05:19:51Z | INFO  | teranode/model/Block.go:2065     | blockassembly| [GetAndValidateSubtrees][Block 3ea891a329c5d88c52288299d7fec673934ed31ecedde555e6cd0384b87df790 (height: 0, id: 0, txCount: 2, size: 452)] fetching and validating subtrees
+2026-09-17T05:19:51Z | INFO  | teranode/model/Block.go:2093     | blockassembly| [GetAndValidateSubtrees][Block 3ea891a329c5d88c52288299d7fec673934ed31ecedde555e6cd0384b87df790 (height: 0, id: 0, txCount: 2, size: 452)] fetching and validating subtrees DONE in 9.495µs
+2026-09-17T05:19:51Z | INFO  | teranode/model/Block.go:1364     | blockassembly| [checkDuplicateTransactions][Block 3ea891a329c5d88c52288299d7fec673934ed31ecedde555e6cd0384b87df790 (height: 0, id: 0, txCount: 2, size: 452)] called
+2026-09-17T05:19:51Z | INFO  | teranode/model/Block.go:1434     | blockassembly| [checkDuplicateTransactions][Block 3ea891a329c5d88c52288299d7fec673934ed31ecedde555e6cd0384b87df790 (height: 0, id: 0, txCount: 2, size: 452)] called DONE in 1.454963ms
+2026-09-17T05:19:51Z | INFO  | teranode/model/Block.go:1050     | blockassembly| [Block:Valid] called for 3ea891a329c5d88c52288299d7fec673934ed31ecedde555e6cd0384b87df790 DONE in 2.598128ms
+2026-09-17T05:19:51Z | DEBUG | blockassembly/Server.go:2007     | blockassembly| [BlockAssembly][c9154fa86c84ad17aa6798a870bb353a1c192174d718d914a4a1ee14159cac25][3ea891a329c5d88c52288299d7fec673934ed31ecedde555e6cd0384b87df790] add block to blockchain
+2026-09-17T05:19:51Z | DEBUG | blockassembly/Server.go:2008     | blockassembly| [BlockAssembly][c9154fa86c84ad17aa6798a870bb353a1c192174d718d914a4a1ee14159cac25][3ea891a329c5d88c52288299d7fec673934ed31ecedde555e6cd0384b87df790] block difficulty: 4.656542374e-10
+2026-09-17T05:19:51Z | DEBUG | blockassembly/Server.go:2015     | blockassembly| [BlockAssembly][c9154fa86c84ad17aa6798a870bb353a1c192174d718d914a4a1ee14159cac25][3ea891a329c5d88c52288299d7fec673934ed31ecedde555e6cd0384b87df790] time since previous block: 5m12.168117806s
+2026-09-17T05:19:51Z | INFO  | blockchain/Server.go:1086        | bchn  | [Blockchain][AddBlock] AddBlock called: 3ea891a329c5d88c52288299d7fec673934ed31ecedde555e6cd0384b87df790
