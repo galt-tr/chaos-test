@@ -1,0 +1,251 @@
+id: freeze-timing-skew
+name: Freeze alert timing skew keeps the fleet in agreement
+description: >
+  Reproduces teranode PR #1764 / issue #1422 on real infrastructure. Node A receives a
+  height-anchored freeze alert early, node B late, node C never (the unaware miner). A block
+  spending the frozen coin BELOW the window must be accepted by every node; a block spending
+  it INSIDE the window must be rejected cleanly by every node that holds the alert.
+requires: [regtest]
+roles:
+  A: teranode1   # receives the alert first
+  B: teranode2   # receives the alert late, mines the below-window block while unaware
+  C: teranode3   # never receives the alert; mines the inside-window block
+params:
+  windowOffset: 2      # windowStart = parentBlock height + windowOffset
+  windowLength: 10     # windowStop  = windowStart + windowLength
+  fee: 500
+steps:
+  - name: converge - mine two blocks on A so any node left on a fork by an earlier run reorgs to the honest chain
+    action: mine
+    with: { node: A, blocks: 2 }
+    as: converge
+    assert:
+      - check: same_tip
+        with: { nodes: [A, B, C] }
+        timeout: 90s
+        message: fleet converged on A's chain
+  - name: preflight - fleet agrees and alert network is quiet
+    action: note
+    with: { message: "checking fleet agreement and alert sequences" }
+    assert:
+      - check: same_tip
+        with: { nodes: [A, B, C] }
+        timeout: 60s
+      - check: alert_seq
+        with: { node: A, equals: "${latest}" }
+        timeout: 30s
+        message: A already holds every alert in the log (nothing pending)
+
+  - name: fund - mine to maturity on A
+    action: mine
+    with: { node: A, blocks: 101 }
+    as: fund
+    timeout: 10m
+    assert:
+      - check: same_tip
+        with: { nodes: [A, B, C] }
+        timeout: 120s
+
+  - name: victim key
+    action: newkey
+    with: { name: "victim-${fund.last}", note: "holds the frozen coins" }
+    as: victim
+
+  - name: coinbase of the first block mined by this run (100 confirmations, unfrozen, pays the miner key)
+    action: coinbase
+    with: { node: A, height: "${tip(A) - 100}" }
+    as: cb
+
+  - name: parent tx - two victim outputs from the block-1 coinbase
+    action: spend
+    with: { node: A, txid: "${cb.txid}", vout: 0, key: miner, to: "${victim.name}", outputs: 2, fee: "${fee}" }
+    as: parent
+
+  - name: broadcast parent via arcade
+    action: submit
+    with: { target: arcade, tx: "${parent}" }
+    as: parentSubmit
+    assert:
+      - check: expr
+        with: { left: "${parentSubmit.accepted}", right: "true" }
+        message: arcade accepted the parent tx
+      - check: mempool_has
+        with: { node: C, txid: "${parent.txid}" }
+        timeout: 60s
+
+  - name: mine parent block on A
+    action: mine
+    with: { node: A, blocks: 1 }
+    as: parentBlock
+    assert:
+      - check: same_tip
+        with: { nodes: [A, B, C] }
+        timeout: 60s
+      - check: utxo_status
+        with: { node: C, txid: "${parent.txid}", vout: 0, status: OK }
+        timeout: 60s
+
+  - name: compute the freeze window
+    action: set
+    with:
+      windowStart: "${tip(A) + windowOffset}"
+      windowStop: "${tip(A) + windowOffset + windowLength}"
+
+  - name: partition B and C from the alert plane (they must not learn the alert yet)
+    action: partition
+    with: { nodes: [B, C], plane: alert, on: true }
+
+  - name: build alert - freeze both victim outputs over [windowStart, windowStop)
+    action: build_alert
+    with:
+      type: freeze
+      note: "freeze-timing-skew ${parent.txid}"
+      funds:
+        - { txid: "${parent.txid}", vout: 0, start: "${windowStart}", stop: "${windowStop}" }
+        - { txid: "${parent.txid}", vout: 1, start: "${windowStart}", stop: "${windowStop}", policyExpires: true }
+    as: alert
+
+  - name: deliver the alert to A only
+    action: push_alert
+    with: { node: A, sequence: "${alert.sequence}" }
+    assert:
+      - check: utxo_status
+        with: { node: A, txid: "${parent.txid}", vout: 0, status: FROZEN }
+        timeout: 30s
+      - check: utxo_status
+        with: { node: A, txid: "${parent.txid}", vout: 1, status: FROZEN }
+        timeout: 30s
+      - check: utxo_status
+        with: { node: B, txid: "${parent.txid}", vout: 0, status: OK }
+        message: B must not have the freeze yet
+      - check: utxo_status
+        with: { node: C, txid: "${parent.txid}", vout: 0, status: OK }
+        message: C must not have the freeze
+
+  - name: spendBelow - a spend of victim output 0
+    action: spend
+    with: { node: A, txid: "${parent.txid}", vout: 0, key: "${victim.name}", fee: "${fee}" }
+    as: spendBelow
+
+  - name: policy tier - A refuses spendBelow into its mempool
+    action: submit
+    with: { target: A, tx: "${spendBelow}" }
+    as: spendBelowOnA
+    assert:
+      - check: expr
+        with: { left: "${spendBelowOnA.status}", right: "403" }
+        message: A rejects the frozen spend at the policy tier
+      - check: expr
+        with: { left: "${spendBelowOnA.body}", right: "FROZEN", op: contains }
+      - check: expr
+        with: { left: "${spendBelowOnA.body}", right: "UTXO_FROZEN (72)", op: contains }
+        should: true
+        message: below the window the mempool rejection should carry the policy code (72), not the consensus code (78)
+
+  - name: B (unaware) accepts spendBelow into its mempool
+    action: submit
+    with: { target: B, tx: "${spendBelow}" }
+    as: spendBelowOnB
+    assert:
+      - check: expr
+        with: { left: "${spendBelowOnB.accepted}", right: "true" }
+      - check: mempool_has
+        with: { node: B, txid: "${spendBelow.txid}" }
+        timeout: 30s
+
+  - name: B mines blockBelow (height windowStart - 1) containing spendBelow
+    action: mine
+    with: { node: B, blocks: 1 }
+    as: blockBelow
+    assert:
+      - check: height
+        with: { node: B, equals: "${windowStart - 1}" }
+        timeout: 20s
+        message: blockBelow sits just below the window
+      - check: same_tip
+        with: { nodes: [A, B, C] }
+        timeout: 45s
+        should: true
+        message: "A holds the freeze but must still accept the below-window block (the #1422 fix; stronger than the PR e2e because A already policy-rejected the tx)"
+      - check: no_event
+        with: { kind: invalid_block, node: A }
+        timeout: 20s
+        message: A never marks blockBelow invalid
+
+  - name: deliver the alert to B (late) by healing its alert plane
+    action: partition
+    with: { nodes: [B], plane: alert, on: false }
+    assert:
+      - check: alert_seq
+        with: { node: B, equals: "${alert.sequence}" }
+        timeout: 60s
+        message: B syncs the alert on its next discovery round
+      - check: utxo_status
+        with: { node: B, txid: "${parent.txid}", vout: 1, status: FROZEN }
+        timeout: 30s
+      - check: same_tip
+        with: { nodes: [A, B, C] }
+        timeout: 30s
+        should: true
+
+  - name: spendInside - a spend of victim output 1
+    action: spend
+    with: { node: C, txid: "${parent.txid}", vout: 1, key: "${victim.name}", fee: "${fee}" }
+    as: spendInside
+
+  - name: C (still unaware) takes spendInside
+    action: submit
+    with: { target: C, tx: "${spendInside}" }
+    as: spendInsideOnC
+    assert:
+      - check: expr
+        with: { left: "${spendInsideOnC.accepted}", right: "true" }
+      - check: mempool_has
+        with: { node: C, txid: "${spendInside.txid}" }
+        timeout: 30s
+
+  - name: remember the agreed tip before the inside-window block
+    action: set
+    with: { agreedTip: "${tiphash(A)}" }
+
+  - name: C mines blockInside (height windowStart) containing spendInside
+    action: mine
+    with: { node: C, blocks: 1 }
+    as: blockInside
+    assert:
+      - check: height
+        with: { node: C, equals: "${windowStart}" }
+        timeout: 20s
+      - check: event
+        with: { kind: invalid_block, node: A, contains: "${blockInside.last}" }
+        timeout: 60s
+        message: A rejects blockInside with an invalid-block verdict
+      - check: event
+        with: { kind: invalid_block, node: B, contains: "${blockInside.last}" }
+        timeout: 60s
+        message: B rejects blockInside too
+      - check: event
+        with: { kind: invalid_block, node: A, pattern: "(?i)consensus[ _-]?frozen" }
+        timeout: 5s
+        should: true
+        message: the verdict names the consensus freeze (UTXO_CONSENSUS_FROZEN on the live path, "consensus-frozen output" on the catch-up path)
+      - check: tip_is
+        with: { node: A, hash: "${agreedTip}" }
+        message: A stays on blockBelow
+      - check: tip_is
+        with: { node: B, hash: "${agreedTip}" }
+        message: B stays on blockBelow
+      - check: no_event
+        with: { kind: invalid_block, node: A, contains: "${blockInside.last}", max: 2 }
+        timeout: 45s
+        should: true
+        message: A does not keep re-validating blockInside (no re-fetch loop)
+
+  - name: restore C's alert plane (C now learns the alert; it is alone on its fork)
+    action: partition
+    with: { nodes: [C], plane: alert, on: false }
+    assert:
+      - check: alert_seq
+        with: { node: C, equals: "${alert.sequence}" }
+        timeout: 60s
+        should: true

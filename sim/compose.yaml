@@ -1,0 +1,44 @@
+# Simulator layer: attaches to a running stack (../stack) via its networks and inventory.
+#   cd sim && podman compose up -d --build     →  http://localhost:8600
+# Chaos actions need the podman socket: systemctl --user enable --now podman.socket
+x-podman:
+  in_pod: false
+
+networks:
+  chaosnet:
+    external: true
+    name: chaos_chaosnet
+  alertnet:
+    external: true
+    name: chaos_alertnet
+  ctlnet:
+    external: true
+    name: chaos_ctlnet
+
+services:
+  orchestrator:
+    image: ${ORCHESTRATOR_IMAGE:-localhost/chaos-orchestrator:local}
+    build:
+      context: ..
+      dockerfile: sim/Dockerfile
+    container_name: chaos-orchestrator
+    networks:
+      chaosnet:
+        ipv4_address: 10.190.0.51
+      alertnet:
+        ipv4_address: 192.0.0.181
+      ctlnet:
+        ipv4_address: 10.191.0.51
+    environment:
+      KAFKA_BROKERS: ${KAFKA_BROKERS:-kafka-shared:9092}
+      DOCKER_HOST: unix:///var/run/docker.sock
+    volumes:
+      - ../stack/config:/config:ro,Z
+      - ../scenarios:/scenarios:ro,Z
+      - ./.data:/data:Z
+      - ${XDG_RUNTIME_DIR}/podman/podman.sock:/var/run/docker.sock
+    security_opt:
+      - label=disable
+    ports:
+      - "${SIM_HOST_PORT:-8600}:8600"
+    restart: unless-stopped

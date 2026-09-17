@@ -1,0 +1,235 @@
+id: freeze-fork-remine
+name: A fork re-mining the below-window spend inside the window is rejected by all alert holders
+description: >
+  The adversarial case from PR #1764's e2e test with real P2P. A and B both hold the freeze
+  and both already record victim output 0 as spent by blockBelow (below the window). C,
+  isolated from the peer plane, mines an empty sibling of blockBelow and then re-mines the
+  same spend at windowStart. When C is healed, A and B must reject the fork block with the
+  consensus-freeze code even though the store's idempotent "already spent by this tx" path
+  would otherwise accept it.
+requires: [regtest]
+roles:
+  A: teranode1
+  B: teranode2
+  C: teranode3
+params:
+  windowOffset: 2
+  windowLength: 10
+  fee: 500
+steps:
+  - name: converge - mine two blocks on A so any node left on a fork by an earlier run reorgs to the honest chain
+    action: mine
+    with: { node: A, blocks: 2 }
+    as: converge
+    assert:
+      - check: same_tip
+        with: { nodes: [A, B, C] }
+        timeout: 90s
+        message: fleet converged on A's chain
+  - name: preflight
+    action: note
+    with: { message: "fork re-mine scenario" }
+    assert:
+      - check: same_tip
+        with: { nodes: [A, B, C] }
+        timeout: 60s
+  - name: fund
+    action: mine
+    with: { node: A, blocks: 101 }
+    as: fund
+    timeout: 10m
+    assert:
+      - check: same_tip
+        with: { nodes: [A, B, C] }
+        timeout: 120s
+  - name: victim key
+    action: newkey
+    with: { name: "victim-fork-${fund.last}" }
+    as: victim
+  - name: coinbase of the first block mined by this run (100 confirmations, unfrozen, pays the miner key)
+    action: coinbase
+    with: { node: A, height: "${tip(A) - 100}" }
+    as: cb
+  - name: parent tx
+    action: spend
+    with: { node: A, txid: "${cb.txid}", vout: 0, key: miner, to: "${victim.name}", outputs: 2, fee: "${fee}" }
+    as: parent
+  - name: broadcast parent via arcade
+    action: submit
+    with: { target: arcade, tx: "${parent}" }
+    as: parentSubmit
+    assert:
+      - check: mempool_has
+        with: { node: B, txid: "${parent.txid}" }
+        timeout: 60s
+  - name: mine parent block on A
+    action: mine
+    with: { node: A, blocks: 1 }
+    as: parentBlock
+    assert:
+      - check: same_tip
+        with: { nodes: [A, B, C] }
+        timeout: 60s
+      - check: utxo_status
+        with: { node: C, txid: "${parent.txid}", vout: 0, status: OK }
+        timeout: 60s
+  - name: window
+    action: set
+    with:
+      windowStart: "${tip(A) + windowOffset}"
+      windowStop: "${tip(A) + windowOffset + windowLength}"
+      parentTip: "${tiphash(A)}"
+  - name: isolate C from the peer plane and from the alert plane
+    action: partition
+    with: { nodes: [C], plane: p2p, on: true }
+  - name: isolate C alert plane
+    action: partition
+    with: { nodes: [C], plane: alert, on: true }
+  - name: hold B's alert plane so B stays unaware while it mines blockBelow
+    action: partition
+    with: { nodes: [B], plane: alert, on: true }
+  - name: build freeze alert
+    action: build_alert
+    with:
+      type: freeze
+      funds:
+        - { txid: "${parent.txid}", vout: 0, start: "${windowStart}", stop: "${windowStop}" }
+        - { txid: "${parent.txid}", vout: 1, start: "${windowStart}", stop: "${windowStop}" }
+    as: alert
+  - name: deliver alert to A
+    action: push_alert
+    with: { node: A, sequence: "${alert.sequence}" }
+    assert:
+      - check: utxo_status
+        with: { node: A, txid: "${parent.txid}", vout: 0, status: FROZEN }
+        timeout: 30s
+  - name: spendBelow
+    action: spend
+    with: { node: A, txid: "${parent.txid}", vout: 0, key: "${victim.name}", fee: "${fee}" }
+    as: spendBelow
+  - name: B takes spendBelow
+    action: submit
+    with: { target: B, tx: "${spendBelow}" }
+    as: spendBelowOnB
+    assert:
+      - check: mempool_has
+        with: { node: B, txid: "${spendBelow.txid}" }
+        timeout: 30s
+  - name: B mines blockBelow
+    action: mine
+    with: { node: B, blocks: 1 }
+    as: blockBelow
+    assert:
+      - check: height
+        with: { node: B, equals: "${windowStart - 1}" }
+        timeout: 20s
+      - check: same_tip
+        with: { nodes: [A, B] }
+        timeout: 45s
+        should: true
+        message: A accepts the below-window spend
+  - name: heal B's alert plane (late alert on an already-spent output)
+    action: partition
+    with: { nodes: [B], plane: alert, on: false }
+    assert:
+      - check: alert_seq
+        with: { node: B, equals: "${alert.sequence}" }
+        timeout: 60s
+  - name: remember the agreed tip
+    action: set
+    with: { agreedTip: "${tiphash(A)}" }
+  - name: C mines an empty sibling of blockBelow (forkBase)
+    action: mine
+    with: { node: C, blocks: 1 }
+    as: forkBase
+    assert:
+      - check: height
+        with: { node: C, equals: "${windowStart - 1}" }
+        timeout: 20s
+  - name: C takes spendBelow
+    action: submit
+    with: { target: C, tx: "${spendBelow}" }
+    as: spendBelowOnC
+    assert:
+      - check: mempool_has
+        with: { node: C, txid: "${spendBelow.txid}" }
+        timeout: 30s
+  - name: C re-mines spendBelow inside the window (forkInside)
+    action: mine
+    with: { node: C, blocks: 1 }
+    as: forkInside
+    assert:
+      - check: height
+        with: { node: C, equals: "${windowStart}" }
+        timeout: 20s
+  - name: mark - everything from here counts as the fork's reception
+    action: mark
+    as: forkMark
+
+  - name: heal C's peer plane
+    action: partition
+    with: { nodes: [C], plane: p2p, on: false }
+
+  - name: give A and B 20 s to react to C's node_status alone
+    action: wait
+    with: { seconds: 20 }
+    assert:
+      - check: event
+        with: { kind: invalid_block, node: A, contains: "${forkInside.last}", since: "${forkMark.eventId}" }
+        timeout: 1s
+        should: true
+        message: A judged the fork from node_status alone within 20 s (observed both ways - it sometimes waits for a block announcement)
+
+  - name: C keeps mining on its fork - a block announcement always drags A and B into validating the fork
+    action: mine
+    with: { node: C, blocks: 1 }
+    as: forkNext
+    assert:
+      - check: event
+        with: { kind: invalid_block, node: A, contains: "${forkInside.last}", since: "${forkMark.eventId}" }
+        timeout: 90s
+        message: A rejects forkInside
+      - check: event
+        with: { kind: invalid_block, node: B, contains: "${forkInside.last}", since: "${forkMark.eventId}" }
+        timeout: 90s
+        message: B rejects forkInside (even though it records the coin as spent by this very tx)
+      - check: event
+        with: { kind: invalid_block, node: A, pattern: "(?i)consensus[ _-]?frozen", since: "${forkMark.eventId}" }
+        timeout: 5s
+        should: true
+        message: the verdict names the consensus freeze
+      - check: tip_is
+        with: { node: A, hash: "${agreedTip}" }
+        timeout: 30s
+        should: true
+        message: A is back on blockBelow after the fork was judged invalid (observed - A stays on the empty sibling forkBase)
+      - check: tip_is
+        with: { node: B, hash: "${agreedTip}" }
+        timeout: 30s
+        should: true
+        message: B is back on blockBelow after the fork was judged invalid
+      - check: no_event
+        with: { kind: invalid_block, node: A, contains: "${forkInside.last}", max: 2, since: "${forkMark.eventId}" }
+        timeout: 45s
+        should: true
+        message: no re-validation loop of forkInside on A
+
+  - name: A mines one block - after the reorg does it re-admit and mine the frozen spend itself?
+    action: mine
+    with: { node: A, blocks: 1 }
+    as: aNext
+    assert:
+      - check: no_event
+        with: { kind: invalid_block, node: B, contains: "${aNext.last}" }
+        timeout: 30s
+        should: true
+        message: B does not reject A's next block (the PR residual - reorg re-admits the spend into A's template without re-validation - would make B reject it)
+      - check: same_tip
+        with: { nodes: [A, B] }
+        timeout: 30s
+        should: true
+        message: A and B agree after A's next block
+
+  - name: restore C's alert plane
+    action: partition
+    with: { nodes: [C], plane: alert, on: false }
