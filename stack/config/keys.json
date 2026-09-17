@@ -1,0 +1,74 @@
+{
+  "arcadeCallbackToken": "3ba16c3d0b9fd5b537e8adade923e75c52f8ed55a75f98db2b3a188c1101ae30",
+  "walletServerKey": {
+    "private_key_hex": "6f85834ded39e630c122778dad78403741eca1a82488c1578b40a15b1bc1f282",
+    "public_key_hex": "03307d41e8d214d5991c44cb81c5f21374ad7e9aa05b32845276d1733178484add"
+  },
+  "walletUserKey": {
+    "private_key_hex": "299fbb100a1cd5b0e2f41b83097c826e1faf1c7ca8ac019d12ac8e4707f280ed",
+    "public_key_hex": "02ca19e9927471623201a5b760744dd6fac2b38331e15f0e3eca148bd50a02ae5d"
+  },
+  "adminAPIKey": "chaos-24fc8acdbbf10db981e0eed2eb3d7fcc2a6ea096",
+  "genesis": [
+    {
+      "private_key_hex": "96e58bc6fccb544ca8dd1f4cf6f50e63fc1a1e12698ef106310f6c6dd4f00ddc",
+      "public_key_hex": "02461ae286f650c0c8ed1443878c2c175421c9cd4b55e9c0f90b2f9f632809e9e1"
+    },
+    {
+      "private_key_hex": "c0f88e66485384ac913dd4d171d403b4f3eaec3793af4700f7076d1a1a43e3f1",
+      "public_key_hex": "024dbb4d7a102e4523d98d3f072d4c5becaa40467d3e0d71c080bcdb1c86e6f20d"
+    },
+    {
+      "private_key_hex": "b23d983960e35ac462a621293d108868b31f20dd539e55a8dcfb89e964a23dde",
+      "public_key_hex": "02ac035846df2c3f8d3a8d6f4dc827b22a3b1f09cd9c3f4bc9c4be341bd082a877"
+    },
+    {
+      "private_key_hex": "bcc3a89f5715f1ce64ebe29f5e54740dee77ba3187a008335c17d58d90fdaef8",
+      "public_key_hex": "0251f3950a900533ef793c258d9d9cfade828fca112a3ec443a5d764b3c2304515"
+    },
+    {
+      "private_key_hex": "39213d0065ec87425e53db8b1da7d5fddd1d9939f6e9cc73a314e14c2ff23bec",
+      "public_key_hex": "03752c3c782243daaad416251c4df6bd89689cec6eefba9a568c6346d9f2c6ef4a"
+    }
+  ],
+  "publisher": {
+    "private_key_hex": "654590ab1cfe2ce837098a4e261178cf86482fef54bcc9f6ecdd58740f8f5129f3efa13ba877676af93edb40cef4d041c341972cecb478f96948e29aeb756c7b",
+    "peer_id": "12D3KooWSEbAmQpuMwqVFn1kjoQ1nFF7pW4hD9cLyjN2aP1TeMri"
+  },
+  "hub": {
+    "private_key_hex": "ae32aa922975f7eaa0758a0fd791b8b4442227330e74952bdca642267f6cf491957df31e03036d8b1baac439ec790d30d291f88dad0a43c9f9487d4a98cd83a2",
+    "peer_id": "12D3KooWKsvJigHNVRpZCsKYJJfyd1HTBNKob1YWKRKj6CbD93NR"
+  },
+  "nodes": {
+    "teranode1": {
+      "p2p": {
+        "private_key_hex": "d5688296e9c53b46ab5aa9c010f45b9a6db4b0a084c4f855641801e80cb822e818508b1b5eca5a9629b3c880a33e720fa1547d7d669b96131ebf9dc9970368c9",
+        "peer_id": "12D3KooWBTHBmm3DNJnUt5AiMFePRgnmtWhMBFK4ZLZYAdYgVKjE"
+      },
+      "alert": {
+        "private_key_hex": "8b09331f29d5ad2e711abbbfe8b8c3d2ab645af2b2e7dbff37b0dd2d583c5e8404e6f71bf53e5f779cbc9bcd2d9f1d32863996398ceae2fa04e34405be59380f",
+        "peer_id": "12D3KooWA9W4opHNMFP3no4yCFZaPHD8u1SiFSTee6TTfSHTCzeJ"
+      }
+    },
+    "teranode2": {
+      "p2p": {
+        "private_key_hex": "5bb7a4c9eb1e0cfa99e7a9db64040d16d86c8b85c2713a4759bb63e1341f3ca86706811bf0ef74dbeca1f190e1c95100980475e8dc5a0c244d0051fe51e911f9",
+        "peer_id": "12D3KooWGkXuySDRhqbRmJZvNX3UpigKtRSqTkEhu2d76o9BbP9a"
+      },
+      "alert": {
+        "private_key_hex": "5e7029e492c2842162e1e390a64c2230f31a81a41b1e87c98475822bca585006fc6565ad8676d94a9859de27d7e8f6ae8cff84cda29fe0dd3a52b14994904dd9",
+        "peer_id": "12D3KooWSocasc6jAE83uiYHbjNH3ixeARBLEahqzRyG8uJcxveU"
+      }
+    },
+    "teranode3": {
+      "p2p": {
+        "private_key_hex": "6660dc4b7af7d9a2d0f416981162d95f828a6e0e0bf2da5d27eba80b5c205c84411572b232bff5069880119666033b545dc1fa2e74df6599444d36daff6b5899",
+        "peer_id": "12D3KooWECRdxC5YXaDZG16gcewMneDJ97TVUfTXhUzgZwpyaZCL"
+      },
+      "alert": {
+        "private_key_hex": "52e21bfcf1acbdc338405ad0c74e2e1395baf91b45d6dc27ed31500b58423b3a7d71613d51a603fa33d3002719927ef3a0affb51746d19e7c135a1d3e62c85b2",
+        "peer_id": "12D3KooWJG3QRnnoEq5Uvo5ZeLcQHGk5szxaYuAPE8VX2gKyB8rD"
+      }
+    }
+  }
+}

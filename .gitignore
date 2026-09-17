@@ -1,0 +1,12 @@
+stack/vendor/
+stack/.data/
+sim/ui/node_modules/
+sim/ui/dist/
+*.db
+*.sqlite
+.env
+stack/spike/data/
+stack/spike/generated/
+stack/spike/.env
+stack/.env
+sim/.data/

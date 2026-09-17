@@ -1,0 +1,162 @@
+# Milestone-0 spike: ONE patched teranode + Redpanda + go-alert-system hub + alertctl,
+# on private networks only. Generated .env (see gen-env.sh) supplies keys and peer ids.
+#
+#   ./gen-env.sh && podman compose up -d && podman compose logs -f teranode1
+#
+# Networks: chaosnet (node p2p, kafka), alertnet (alert p2p; a reserved subnet libp2p treats
+# as public so the alert library's private-IP gater and DHT filter pass), ctlnet (RPC/API).
+# INTERNAL=true makes all three networks egress-free to prove nothing needs the internet.
+
+x-podman:
+  in_pod: false
+
+networks:
+  chaosnet:
+    name: chaos_chaosnet
+    internal: ${INTERNAL:-false}
+    ipam:
+      config:
+        - subnet: 10.190.0.0/24
+  alertnet:
+    name: chaos_alertnet
+    internal: ${INTERNAL:-false}
+    ipam:
+      config:
+        - subnet: 192.0.0.128/26
+          gateway: 192.0.0.129
+  ctlnet:
+    name: chaos_ctlnet
+    internal: ${INTERNAL:-false}
+    ipam:
+      config:
+        - subnet: 10.191.0.0/24
+
+services:
+  kafka-shared:
+    image: docker.io/redpandadata/redpanda:v26.1.9
+    container_name: chaos-kafka-shared
+    networks:
+      chaosnet:
+        ipv4_address: 10.190.0.5
+    command:
+      - redpanda start
+      - --smp 1
+      - --overprovisioned
+      - --node-id 0
+      - --kafka-addr PLAINTEXT://0.0.0.0:9092
+      - --advertise-kafka-addr PLAINTEXT://kafka-shared:9092
+      - --pandaproxy-addr 0.0.0.0:9093
+      - --advertise-pandaproxy-addr localhost:9093
+    mem_limit: 512m
+    healthcheck:
+      test: ["CMD-SHELL", "rpk cluster health | grep -q 'Healthy:.*true'"]
+      interval: 5s
+      timeout: 5s
+      retries: 20
+
+  teranode1:
+    image: ${TERANODE_IMAGE:-localhost/teranode-chaos:pr1764}
+    container_name: chaos-teranode1
+    networks:
+      chaosnet:
+        ipv4_address: 10.190.0.11
+      alertnet:
+        ipv4_address: 192.0.0.141
+      ctlnet:
+        ipv4_address: 10.191.0.11
+    depends_on:
+      kafka-shared:
+        condition: service_healthy
+    entrypoint: ["/app/wait.sh", "kafka-shared", "9092", "0", "--", "/app/teranode.run", "-localTestStartFromState=RUNNING"]
+    environment:
+      SETTINGS_CONTEXT: docker.teranode1.chaos
+      logLevel: DEBUG
+      # --- identity / stores (env overrides win over settings.conf, by exact key) ---
+      clientName: teranode1
+      coinbase_arbitrary_text: /teranode1/
+      blockchain_store: sqlite:///blockchain
+      utxostore: sqlite:///utxostore
+      startLegacy: "false"
+      startBlockPersister: "false"
+      startCoinbase: "false"
+      startFaucet: "false"
+      minminingtxfee: "0"
+      tracing_enabled: "false"
+      # --- node p2p: libp2p binds all interfaces; advertise only the chaosnet address ---
+      p2p_advertise_addresses: /ip4/10.190.0.11/tcp/9905
+      p2p_bootstrap_peers: ""
+      p2p_static_peers: ""
+      p2p_dht_mode: "off"
+      p2p_allow_private_ips: "true"
+      p2p_share_private_addresses: "true"
+      p2p_private_key: ${TERANODE1_P2P_KEY}
+      p2p_peer_id: ${TERANODE1_P2P_PEER_ID}
+      # --- kafka topics (shared broker, per-node names) ---
+      KAFKA_BLOCKS: blocks-teranode1
+      KAFKA_BLOCKS_FINAL: blocks-final-teranode1
+      KAFKA_INVALID_BLOCKS: invalid-blocks-teranode1
+      KAFKA_INVALID_SUBTREES: invalid-subtrees-teranode1
+      KAFKA_LEGACY_INV: legacy-inv-teranode1
+      KAFKA_REJECTEDTX: rejectedtx-teranode1
+      KAFKA_SUBTREES: subtrees-teranode1
+      KAFKA_TXMETA: txmeta-teranode1
+      KAFKA_VALIDATORTXS: validatortxs-teranode1
+      # --- alert service: private network via the patched settings ---
+      startAlert: "true"
+      alert_genesis_keys: ${GENESIS_PUBKEYS}
+      alert_p2p_private_key: ${TERANODE1_ALERT_KEY}
+      alert_p2p_bootstrap_peer: /ip4/192.0.0.130/tcp/9906/p2p/${HUB_PEER_ID}
+      alert_p2p_allow_private_ips: "true"
+      alert_p2p_peer_discovery_interval: 15s
+      alert_p2p_dht_mode: client
+    volumes:
+      - ./data/teranode1:/app/data:Z
+    ports:
+      - "21292:9292"   # rpc
+      - "20090:8090"   # asset http + dashboard
+      - "20000:8000"   # health
+      - "20833:8833"   # propagation http
+    healthcheck:
+      test: ["CMD-SHELL", "nc -z 127.0.0.1 8000"]
+      interval: 5s
+      timeout: 3s
+      retries: 60
+    mem_limit: 3g
+
+  alert-system:
+    image: ${ALERT_SYSTEM_IMAGE:-localhost/go-alert-system:v0.1.17}
+    container_name: chaos-alert-system
+    networks:
+      alertnet:
+        ipv4_address: 192.0.0.130
+      ctlnet:
+        ipv4_address: 10.191.0.30
+    environment:
+      ALERT_SYSTEM_ENVIRONMENT: local
+      ALERT_SYSTEM_CONFIG_FILEPATH: /config/config.json
+    volumes:
+      - ./generated/alert-system.json:/config/config.json:ro,Z
+      - ./data/alert-system:/data:Z,U
+    ports:
+      - "3000:3000"
+
+  alertctl:
+    image: ${ALERTCTL_IMAGE:-localhost/chaos-test:local}
+    container_name: chaos-alertctl
+    profiles: ["tools"]
+    networks:
+      alertnet:
+        ipv4_address: 192.0.0.150
+      ctlnet:
+        ipv4_address: 10.191.0.50
+    environment:
+      ALERTCTL_KEYS: /data/keys.json
+      ALERTCTL_LOG: /data/alerts.json
+      ALERTCTL_HUB: http://10.191.0.30:3000
+      ALERTCTL_BOOTSTRAP: /ip4/192.0.0.130/tcp/9906/p2p/${HUB_PEER_ID}
+      TERANODE1_ALERT_ADDR: /ip4/192.0.0.141/tcp/9908/p2p/${TERANODE1_ALERT_PEER_ID}
+      TERANODE1_RPC: http://10.191.0.11:9292
+      TERANODE1_ASSET: http://10.191.0.11:8090/api/v1
+    volumes:
+      - ./generated:/data:Z
+    entrypoint: ["sleep", "infinity"]
