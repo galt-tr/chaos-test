@@ -113,7 +113,7 @@ export function NodeSelect({ nodes, value, onChange, extra = [], allowEmpty = fa
   return (
     <select value={value} onChange={(e) => onChange(e.target.value)}>
       {allowEmpty && <option value="">(default)</option>}
-      {nodes.map((n) => <option key={n.name} value={n.name}>{n.name}</option>)}
+      {nodes.map((n) => <option key={n.name} value={n.name}>{n.name}{n.kind === 'svnode' ? ' (sv)' : ''}</option>)}
       {extra.map((x) => <option key={x} value={x}>{x}</option>)}
     </select>
   );

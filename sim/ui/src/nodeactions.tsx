@@ -7,7 +7,7 @@
  *  Chaos.tsx would make Fleet and Chaos import each other.
  */
 import { useRef, useState } from 'react';
-import { api, type NodeState } from './api';
+import { api, isSV, type NodeState } from './api';
 import type { useActions } from './hooks';
 import { Status, Tip } from './ui';
 
@@ -89,13 +89,15 @@ export function PartitionToggle({ n, status, run, plane }: ActionProps & { plane
   const st = status[key];
   const cut = (n.partitions ?? []).includes(plane);
   const net = plane === 'alert' ? 'alertnet' : 'chaosnet';
+  // An SV node is not on the alert network itself; its go-alert-system sidecar is.
+  const target = plane === 'alert' && isSV(n) ? `${n.name}'s alert sidecar` : n.name;
   const toggle = () => run(key, () => api.partition(n.name, plane, !cut),
     () => (cut ? `${plane} plane reconnected` : `${plane} plane disconnected`));
   return (
     <>
       <button className={cut ? '' : 'danger'} onClick={toggle} disabled={st?.busy}
-        title={cut ? `reconnect ${n.name} to ${net} with its pinned IP` : `disconnect ${n.name} from ${net} (podman network disconnect)`}>
-        {cut ? `heal ${plane}` : `cut ${plane}`}
+        title={cut ? `reconnect ${target} to ${net} with its pinned IP` : `disconnect ${target} from ${net} (podman network disconnect)`}>
+        {cut ? `heal ${plane}` : `cut ${plane === 'alert' && isSV(n) ? 'sidecar alert' : plane}`}
       </button>
       <Status st={st} />
     </>
@@ -137,7 +139,9 @@ export function NodeControls({ n, status, run }: ActionProps) {
   return (
     <div style={{ marginTop: 10, borderTop: '1px solid var(--line)', paddingTop: 8 }}>
       <div className="row">
-        <MineControl n={n} status={status} run={run} />
+        {isSV(n)
+          ? <span className="small muted" title="SV nodes follow the teranodes over the legacy service; mine on a teranode">follower</span>
+          : <MineControl n={n} status={status} run={run} />}
         <button className="link" onClick={() => setMore(!more)} title="network partitions and container lifecycle for this node">
           {more ? '▾ chaos' : '▸ chaos'}
         </button>

@@ -1,10 +1,13 @@
+export type NodeKind = 'teranode' | 'svnode';
 export type NodeState = {
-  name: string; index: number; reachable: boolean; height: number; tip: string; fsm: string;
-  mempoolCount: number; mempool?: string[]; alertSeq: number; alertReachable: boolean; version?: string;
-  container: string; partitions?: string[]; error?: string; updatedAt: string;
-  /** The node's own asset dashboard, reachable from the browser (static config). */
+  kind?: NodeKind; name: string; index: number; reachable: boolean; height: number; tip: string; fsm: string;
+  peers?: number; mempoolCount: number; mempool?: string[]; alertSeq: number; alertReachable: boolean;
+  alertSource?: 'node' | 'sidecar'; alertUnprocessed?: number; sidecarURL?: string; sidecarContainer?: string;
+  version?: string; container: string; partitions?: string[]; error?: string; updatedAt: string;
+  /** The node's own asset dashboard (teranodes), reachable from the browser (static config). */
   hostURL?: string;
 };
+export const isSV = (n: NodeState) => n.kind === 'svnode';
 export type ArcadeDatahub = { url: string; node?: string; source?: string; healthy: boolean };
 export type ArcadeState = {
   configured: boolean; reachable: boolean; healthy: boolean; version?: string; status?: string;
