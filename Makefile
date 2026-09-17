@@ -38,6 +38,10 @@ build-alert-system: ## go-alert-system hub image (our Dockerfile, fully-qualifie
 
 up: ## start the stack (teranodes, kafka, alert hub) + tools container
 	mkdir -p $(STACK)/.data/tools $(STACK)/.data/alert-system $(STACK)/.data/arcade $(STACK)/.data/merkle-service $(STACK)/.data/wallet-db
+	@# the hub image runs as USER 65534; compose asks for :U on .data/alert-system but
+	@# docker-compose (podman's preferred provider when installed) drops it, leaving the
+	@# dir owned by root inside the userns. Do the remap ourselves, provider-independent.
+	@podman unshare chown -R 65534:65534 $(STACK)/.data/alert-system
 	cd $(STACK) && podman compose $(PROFILES) up -d
 
 down: ## stop and remove the stack (keeps .data/)
