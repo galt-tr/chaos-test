@@ -1,0 +1,4 @@
+=== arcade :latest (A/B re-run) — processing-status ===
+{"blockHash":"17a772afb893a74b68bdfc7d5f3b6630c4ec637517229b2834cb3d7cd914c572","blockHeight":3,"headerSeenAt":"2026-09-17T19:34:50.240Z","status":"orphaned","orphanedAt":"2026-09-17T19:34:59.640Z","hasBlockProcessed":false,"hasCompoundBUMP":false}
+=== arcade :latest (A/B re-run) — chaintracks header at 3 ===
+{"version":536870912,"previousHash":"49a9942e50e631d46b51afe7f92016555f0d441a31af00df7a66a4d1ca6fdf51","merkleRoot":"59c26daccb8445529325a5d6084b6856c6c518589026ea3b7f41030c36b265f4","time":1789673690,"bits":545259519,"nonce":2,"height":3,"hash":"17a772afb893a74b68bdfc7d5f3b6630c4ec637517229b2834cb3d7cd914c572"}

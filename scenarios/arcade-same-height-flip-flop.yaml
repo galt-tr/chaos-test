@@ -1,0 +1,189 @@
+id: arcade-same-height-flip-flop
+name: A resurrected canonical block must not stay orphaned in arcade's block_processing
+description: >
+  Reproduces arcade issue #339. A block is mined, seen by arcade, and becomes its chaintracks
+  tip. A competing chain then outweighs it, so arcade's reorg handler correctly orphans it.
+  The original chain is then extended past the competitor, which makes that block the
+  active-chain block at its height again. Arcade's own chaintracks agrees — but its
+  block_processing row is never returned to active, so the instance reports a canonical block
+  as orphaned indefinitely.
+
+  A consumer reading processing-status as a reorg feed would demote every transaction in that
+  block, which is what makes this worth failing a run over. The final assertion is deliberately
+  not a `should` finding: while the bug is present this scenario FAILS.
+
+  Why it reproduces (arcade services/chaintracks_server/block_status_tracker.go):
+  recordReorg marks ev.OrphanedHashes and upserts ev.NewTip, and nothing else. On the second
+  reorg the resurrected block sits strictly BETWEEN the common ancestor and the new tip, so no
+  ReorgEvent ever names it and no code path returns it to active. The tie-scan cannot help
+  either: it only ever demotes rows (it skips any row whose status is not active).
+
+  Two details are load-bearing:
+
+  * The block under test must become arcade's chaintracks TIP before it is orphaned. Only the
+    tip channel calls UpsertBlockHeaderSeen, which is what writes a real block_height. A block
+    that arrives as a mere equal-work alternate is filed by chaintracks as "orphan/alternate
+    chain", emits no tip event, and gets only the height-0 placeholder row MarkBlockProcessed
+    creates — which the reorg path and the tie-scan's height filter both skip. Hence the fork
+    here is built by work, not by a same-height race.
+
+  * The wait before the second reorg. Arcade's reconciler has a resurrection short-circuit that
+    would heal the row, but only while the row is still on its queue (status='orphaned' AND
+    reconciled_at IS NULL). Letting the reconciler stamp reconciled_at first takes the row off
+    that queue permanently, which is what makes the reproduction deterministic rather than a
+    race. PR #343's own e2e test arms the trap the same way.
+requires: [regtest]
+roles:
+  A: teranode1   # builds the rival chain in private, then publishes it to orphan the subject
+  B: teranode2   # bystander; proves the whole fleet converges, not just the two miners
+  C: teranode3   # mines the block under test, then privately extends it to resurrect it
+params:
+  # How long to let arcade's reconciler stamp reconciled_at. With the regtest config
+  # (reconciler.interval_ms 2000, max_defer_attempts 2) a few seconds is ample; raise it if the
+  # arcade under test runs the stock 30s tick.
+  armSeconds: 15
+steps:
+  - name: stop the auto-miner — a block arriving mid-race would invalidate the whole run
+    action: automine
+    with: { enabled: false }
+
+  - name: converge the fleet on a neutral node so neither fork miner starts ahead
+    action: mine
+    with: { node: B, blocks: 2 }
+    assert:
+      - { check: same_tip, with: { nodes: [A, B, C] }, timeout: 90s }
+
+  - name: record the height the fork will start from
+    action: set
+    with: { baseH: "${tip(A)}" }
+    as: base
+
+  - name: isolate A — it loses both peer announcements and arcade's datahub access
+    action: partition
+    with: { nodes: [A], plane: p2p, on: true }
+
+  - name: A builds the first block of its private rival chain
+    action: mine
+    with: { node: A, blocks: 1 }
+    as: rival1
+
+  - name: A builds the second, so its chain will outweigh anything at baseH+1
+    action: mine
+    with: { node: A, blocks: 1 }
+    as: rival2
+    assert:
+      - check: height
+        with: { node: A, equals: "${baseH + 2}" }
+        message: A holds a two-block private chain that arcade cannot see yet
+
+  - name: C mines the block under test, which arcade sees and adopts as its chaintracks tip
+    action: mine
+    with: { node: C, blocks: 1 }
+    as: subject
+    assert:
+      - check: height
+        with: { node: C, equals: "${baseH + 1}" }
+      - check: same_tip
+        with: { nodes: [B, C] }
+        timeout: 90s
+        message: B and C agree on the subject block (A is still partitioned)
+      # Becoming the tip is what gets a real block_height onto the row via
+      # UpsertBlockHeaderSeen. Without this the whole reproduction is vacuous, so assert it.
+      - check: arcade_canonical
+        with: { height: "${baseH + 1}", hash: "${subject.last}" }
+        timeout: 90s
+        message: arcade's chaintracks adopted the subject block as its tip
+      - check: arcade_block_status
+        with: { hash: "${subject.last}", status: active }
+        timeout: 60s
+        message: arcade recorded the subject block active at a real height
+
+  - name: isolate C so it keeps the subject block as its tip through the coming reorg
+    action: partition
+    with: { nodes: [C], plane: p2p, on: true }
+
+  - name: publish A's rival chain — it outweighs the subject, so arcade must orphan it
+    action: partition
+    with: { nodes: [A], plane: p2p, on: false }
+    assert:
+      - check: same_tip
+        with: { nodes: [A, B] }
+        timeout: 180s
+        message: B reorged onto A's heavier chain (C is partitioned and still holds the subject)
+      # Correct behaviour at this instant, and named directly by the ReorgEvent's OrphanedHashes.
+      # Asserting it here means a later failure cannot be confused with the reorg never happening.
+      - check: arcade_block_status
+        with: { hash: "${subject.last}", status: orphaned }
+        timeout: 120s
+        message: arcade's reorg handler orphaned the subject block
+
+  - name: let arcade's reconciler stamp reconciled_at, taking the row off its repair queue
+    action: wait
+    with: { seconds: "${armSeconds}" }
+
+  - name: C privately extends the subject block — first of two
+    action: mine
+    with: { node: C, blocks: 1 }
+    as: revive1
+
+  - name: C privately extends it again, so the subject's chain outweighs the rival chain
+    action: mine
+    with: { node: C, blocks: 1 }
+    as: revive2
+    assert:
+      - check: height
+        with: { node: C, equals: "${baseH + 3}" }
+        message: C's chain is now one block heavier than A's
+
+  - name: publish C's chain — the subject block becomes canonical again
+    action: partition
+    with: { nodes: [C], plane: p2p, on: false }
+    assert:
+      - check: same_tip
+        with: { nodes: [A, B, C] }
+        timeout: 180s
+        message: the whole fleet reorged back onto the subject block's chain
+
+  - name: arcade's own chaintracks agrees the resurrected block is canonical
+    action: note
+    with: { message: "subject=${subject.last} rivals=${rival1.last},${rival2.last} at baseH ${baseH}" }
+    assert:
+      - check: arcade_canonical
+        with: { height: "${baseH + 1}", hash: "${subject.last}" }
+        timeout: 120s
+        message: arcade's chaintracks has the resurrected block at its height
+
+  - name: and its block_processing row must say so too
+    action: note
+    with: { message: "checking arcade's durable projection against its own chain view" }
+    assert:
+      # THE ASSERTION. No `should:` — while issue #339 is present this fails the run, which is
+      # the point: the same instance reports a block as orphaned that it simultaneously reports
+      # as the active-chain block at its height.
+      - check: arcade_block_status
+        with: { hash: "${subject.last}", status: active }
+        timeout: 120s
+        message: >
+          the resurrected block is the active-chain block at its height, so block_processing
+          must report it active — reporting orphaned would tell every consumer to demote its
+          transactions
+      # The blocks the second ReorgEvent *does* name heal correctly; asserting them proves the
+      # failure above is specific to the unnamed resurrected block, not a dead reorg pipeline.
+      #
+      # rival1 is deliberately NOT asserted. It was mined at the subject's height, so it was
+      # never arcade's tip (no UpsertBlockHeaderSeen) and, with no transactions in it, was never
+      # processed either — and MarkBlocksOrphaned skips hashes with no existing row
+      # (store/pebble/pebble.go, `if prev == nil { continue }`). Arcade therefore holds no row
+      # for it at all, by design, and asserting one would fail for a reason unrelated to #339.
+      - check: arcade_block_status
+        with: { hash: "${rival2.last}", status: orphaned }
+        timeout: 60s
+        message: the rival chain's tip lost the second reorg, so it is the orphan now
+      - check: arcade_block_status
+        with: { hash: "${revive2.last}", status: active }
+        timeout: 60s
+        message: the new tip is named by the ReorgEvent and is recorded correctly
+
+  - name: restore the auto-miner
+    action: automine
+    with: { enabled: true }

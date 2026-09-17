@@ -1,0 +1,4 @@
+=== arcade PR#343 (a5503ff) — processing-status ===
+{"blockHash":"653df08982c9c3c44680e12c86f2b71579fa8e3496425115dcf363c52acf9866","blockHeight":3,"headerSeenAt":"2026-09-17T19:28:40.052Z","status":"active","hasBlockProcessed":false,"hasCompoundBUMP":false}
+=== arcade PR#343 — chaintracks header at 3 ===
+{"version":536870912,"previousHash":"4c5c83bff9db4cefdec4a4348ff6297358040330c061c31e778da547283b7c20","merkleRoot":"cde5c893be50594c448471af0e495cd321b25394bd8c8ffcd35352a4fe6274d7","time":1789673320,"bits":545259519,"nonce":2,"height":3,"hash":"653df08982c9c3c44680e12c86f2b71579fa8e3496425115dcf363c52acf9866"}

@@ -11,6 +11,7 @@ import (
 
 	"github.com/bsv-blockchain/chaos-test/internal/alerts"
 	"github.com/bsv-blockchain/chaos-test/internal/api"
+	"github.com/bsv-blockchain/chaos-test/internal/arcade"
 	"github.com/bsv-blockchain/chaos-test/internal/automine"
 	"github.com/bsv-blockchain/chaos-test/internal/chaos"
 	"github.com/bsv-blockchain/chaos-test/internal/teranode"
@@ -791,6 +792,43 @@ func (x *executor) check(ctx context.Context, name string, w map[string]any, sin
 			return false, fmt.Sprintf("arcade says %q, want %q", row.ArcadeStatus, want)
 		}
 		return true, fmt.Sprintf("wallet=%s arcade=%s", row.WalletStatus, row.ArcadeStatus)
+
+	case "arcade_block_status":
+		// Arcade's own projection of the reorg stream. Polls, because the status converges
+		// asynchronously after a reorg.
+		hash := str(w, "hash")
+		want := str(w, "status")
+		row, err := x.e.d.API.ArcadeBlockStatus(ctx, hash)
+		if err != nil {
+			if errors.Is(err, arcade.ErrBlockNotFound) {
+				return false, fmt.Sprintf("arcade has no processing status for %s", short(hash))
+			}
+			return false, err.Error()
+		}
+		detail := fmt.Sprintf("arcade says %s is %q at height %d", short(hash), row.Status, row.BlockHeight)
+		if row.OrphanedAt != "" {
+			detail += " (orphanedAt " + row.OrphanedAt + ")"
+		}
+		if row.ReconciledAt != "" {
+			detail += " (reconciledAt " + row.ReconciledAt + ")"
+		}
+		if want == "" {
+			return true, detail
+		}
+		return row.Status == want, detail + fmt.Sprintf(", want %q", want)
+
+	case "arcade_canonical":
+		// What arcade's embedded chaintracks believes is the active-chain block at a height.
+		// Asserting this next to arcade_block_status is what turns a failure into "the instance
+		// contradicts itself" rather than an ambiguous statement about the fleet.
+		height := uint32(num(w, "height", 0))
+		want := str(w, "hash")
+		got, err := x.e.d.API.ArcadeCanonicalHashAt(ctx, height)
+		if err != nil {
+			return false, err.Error()
+		}
+		return got == want, fmt.Sprintf("arcade chaintracks has %s at height %d (want %s)",
+			short(got), height, short(want))
 
 	case "expr":
 		l, r := str(w, "left"), str(w, "right")

@@ -504,6 +504,9 @@ chaintracks_server:
   enabled: true
   host: 0.0.0.0
   port: 8083
+  # Debounce on the tie-scan that marks a same-height loser orphaned. The 5s default is an age
+  # on regtest, where blocks are mined on demand rather than arriving every ten minutes.
+  tie_scan_min_interval_ms: 500
 callback:
   allow_private_ips: true
 validator:
@@ -513,6 +516,12 @@ validator:
   standard_format_supported: true
 bump_builder:
   grace_window_ms: 5000
+  reconciler:
+    # Arcade defaults are 30s per tick and up to 10 deferred ticks, so a block can wait five
+    # minutes for its reconciled_at stamp. A reorg test has to observe that stamp before it can
+    # trigger the flip-flop, so on regtest the loop is tightened to seconds.
+    interval_ms: 2000
+    max_defer_attempts: 2
 chaintracks:
   # go-chaintracks only learns headers from p2p block announcements. Without persisted state
   # (any recreated container) it sits at regtest genesis (height 0) until the NEXT block is

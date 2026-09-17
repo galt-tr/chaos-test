@@ -61,10 +61,20 @@ clean: down ## also wipe chain/alert state
 	podman unshare rm -rf $(STACK)/.data
 
 wait: ## wait until every node answers (teranode health port, SV node RPC, then sidecar health best-effort)
-	@for n in $$(seq 1 $(N)); do port=$$((20000 + (n-1)*2000)); \
-	  until curl -sf --max-time 2 http://localhost:$$port/health >/dev/null 2>&1; do sleep 2; done; echo "teranode$$n healthy"; done
-	@for j in $$(seq 1 $(SV)); do port=$$((40000 + (j-1)*1000 + 332)); \
-	  until curl -sf --max-time 2 -u bitcoin:bitcoin -H 'content-type: application/json' -d '{"jsonrpc":"1.0","id":"w","method":"getblockcount","params":[]}' http://localhost:$$port >/dev/null 2>&1; do sleep 2; done; echo "svnode$$j healthy"; done
+	@# Bounded, and loud on failure: a container that exits at startup used to leave these
+	@# loops spinning forever with no output, which looks identical to a slow boot.
+	@for n in $$(seq 1 $(N)); do port=$$((20000 + (n-1)*2000)); i=0; \
+	  until curl -sf --max-time 2 http://localhost:$$port/health >/dev/null 2>&1; do \
+	    i=$$((i+1)); if [ $$i -ge 150 ]; then echo "teranode$$n did not become healthy in 5m:"; \
+	      podman ps -a --filter name=chaos-teranode$$n --format '  {{.Names}}  {{.Status}}'; \
+	      echo "  last logs:"; podman logs --tail 5 chaos-teranode$$n 2>&1 | sed 's/^/    /'; exit 1; fi; \
+	    sleep 2; done; echo "teranode$$n healthy"; done
+	@for j in $$(seq 1 $(SV)); do port=$$((40000 + (j-1)*1000 + 332)); i=0; \
+	  until curl -sf --max-time 2 -u bitcoin:bitcoin -H 'content-type: application/json' -d '{"jsonrpc":"1.0","id":"w","method":"getblockcount","params":[]}' http://localhost:$$port >/dev/null 2>&1; do \
+	    i=$$((i+1)); if [ $$i -ge 150 ]; then echo "svnode$$j did not answer RPC in 5m:"; \
+	      podman ps -a --filter name=chaos-svnode$$j --format '  {{.Names}}  {{.Status}}'; \
+	      echo "  last logs:"; podman logs --tail 5 chaos-svnode$$j 2>&1 | sed 's/^/    /'; exit 1; fi; \
+	    sleep 2; done; echo "svnode$$j healthy"; done
 	@for j in $$(seq 1 $(SV)); do port=$$((40000 + (j-1)*1000 + 300)); i=0; \
 	  until curl -sf --max-time 2 http://localhost:$$port/health >/dev/null 2>&1 || [ $$i -ge 45 ]; do sleep 2; i=$$((i+1)); done; \
 	  if [ $$i -ge 45 ]; then echo "alert-svnode$$j: API not up yet (it starts after 2 alert peers connect)"; else echo "alert-svnode$$j up"; fi; done
