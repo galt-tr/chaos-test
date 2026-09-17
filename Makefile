@@ -1,5 +1,7 @@
 # chaos-test: BSV alert-system scenario harness
 N              ?= 3
+SV             ?= 2
+SVNODE_IMAGE   ?= docker.io/bitcoinsv/bitcoin-sv:1.2.2
 TERANODE_REF   ?= fix/1422-height-anchored-freeze
 TERANODE_TAG   ?= pr1764
 TERANODE_REPO  ?= https://github.com/bsv-blockchain/teranode
@@ -12,8 +14,8 @@ PROFILES       ?= --profile tools --profile arcade --profile merkle --profile wa
 
 .PHONY: gen build build-tools build-teranode build-alert-system up down wait status logs tools test tidy
 
-gen: ## regenerate stack/compose.yaml + config for N nodes (keys are kept)
-	go run ./cmd/gen -n $(N) -out $(STACK) -teranode-image localhost/teranode-chaos:$(TERANODE_TAG)
+gen: ## regenerate stack/compose.yaml + config for N teranodes and SV SV nodes (keys are kept)
+	go run ./cmd/gen -n $(N) -sv $(SV) -out $(STACK) -teranode-image localhost/teranode-chaos:$(TERANODE_TAG) -svnode-image $(SVNODE_IMAGE)
 
 build: build-tools build-alert-system build-teranode ## build all images
 
@@ -24,7 +26,10 @@ build-teranode: ## clone TERANODE_REF, apply the alert-p2p settings patch, build
 	@if [ ! -d $(STACK)/vendor/teranode/.git ]; then \
 	  git clone --depth 1 --branch $(TERANODE_REF) $(TERANODE_REPO) $(STACK)/vendor/teranode; fi
 	cd $(STACK)/vendor/teranode && git diff --quiet || (echo "vendor/teranode has local changes (patch already applied?) - continuing"; true)
-	cd $(STACK)/vendor/teranode && (git apply --3way --check ../../patches/teranode/0001-alert-p2p-private-network-settings.patch 2>/dev/null && git apply --3way ../../patches/teranode/0001-alert-p2p-private-network-settings.patch && echo "patch applied") || (git apply --reverse --check ../../patches/teranode/0001-alert-p2p-private-network-settings.patch && echo "patch already applied") || (echo "PATCH DOES NOT APPLY to $(TERANODE_REF) - fix stack/patches first" && exit 1)
+	cd $(STACK)/vendor/teranode && for p in ../../patches/teranode/*.patch; do \
+	  if git apply --3way --check $$p 2>/dev/null; then git apply --3way $$p && echo "applied $$(basename $$p)"; \
+	  elif git apply --reverse --check $$p 2>/dev/null; then echo "already applied $$(basename $$p)"; \
+	  else echo "PATCH $$(basename $$p) DOES NOT APPLY to $(TERANODE_REF) - fix stack/patches first"; exit 1; fi; done
 	cd $(STACK)/vendor/teranode && podman build -t localhost/teranode-chaos:$(TERANODE_TAG) \
 	  --build-arg BASE_IMG=ghcr.io/bsv-blockchain/teranode-base:build-latest \
 	  --build-arg RUN_IMG=ghcr.io/bsv-blockchain/teranode-base:run-latest \
@@ -36,12 +41,13 @@ build-alert-system: ## go-alert-system hub image (our Dockerfile, fully-qualifie
 	  git clone --depth 1 --branch $(ALERT_SYSTEM_REF) $(ALERT_SYSTEM_REPO) $(STACK)/vendor/go-alert-system; fi
 	podman build -t localhost/go-alert-system:$(ALERT_SYSTEM_REF) -f $(STACK)/docker/go-alert-system.Dockerfile $(STACK)/vendor/go-alert-system
 
-up: ## start the stack (teranodes, kafka, alert hub) + tools container
+up: ## start the stack (teranodes, SV nodes + sidecars, kafka, alert hub) + profiles
 	mkdir -p $(STACK)/.data/tools $(STACK)/.data/alert-system $(STACK)/.data/arcade $(STACK)/.data/merkle-service $(STACK)/.data/wallet-db
 	@# the hub image runs as USER 65534; compose asks for :U on .data/alert-system but
 	@# docker-compose (podman's preferred provider when installed) drops it, leaving the
 	@# dir owned by root inside the userns. Do the remap ourselves, provider-independent.
 	@podman unshare chown -R 65534:65534 $(STACK)/.data/alert-system
+	@for j in $$(seq 1 $(SV)); do mkdir -p $(STACK)/.data/svnode$$j $(STACK)/.data/alert-svnode$$j; done
 	cd $(STACK) && podman compose $(PROFILES) up -d
 
 down: ## stop and remove the stack (keeps .data/)
@@ -50,9 +56,14 @@ down: ## stop and remove the stack (keeps .data/)
 clean: down ## also wipe chain/alert state
 	podman unshare rm -rf $(STACK)/.data
 
-wait: ## wait until every node answers on its health port
+wait: ## wait until every node answers (teranode health port, SV node RPC, then sidecar health best-effort)
 	@for n in $$(seq 1 $(N)); do port=$$((20000 + (n-1)*2000)); \
 	  until curl -sf --max-time 2 http://localhost:$$port/health >/dev/null 2>&1; do sleep 2; done; echo "teranode$$n healthy"; done
+	@for j in $$(seq 1 $(SV)); do port=$$((40000 + (j-1)*1000 + 332)); \
+	  until curl -sf --max-time 2 -u bitcoin:bitcoin -H 'content-type: application/json' -d '{"jsonrpc":"1.0","id":"w","method":"getblockcount","params":[]}' http://localhost:$$port >/dev/null 2>&1; do sleep 2; done; echo "svnode$$j healthy"; done
+	@for j in $$(seq 1 $(SV)); do port=$$((40000 + (j-1)*1000 + 300)); i=0; \
+	  until curl -sf --max-time 2 http://localhost:$$port/health >/dev/null 2>&1 || [ $$i -ge 45 ]; do sleep 2; i=$$((i+1)); done; \
+	  if [ $$i -ge 45 ]; then echo "alert-svnode$$j: API not up yet (it starts after 2 alert peers connect)"; else echo "alert-svnode$$j up"; fi; done
 
 status: ## tips and alert sequence
 	$(STACK)/scripts/tips.sh
