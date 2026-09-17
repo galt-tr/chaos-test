@@ -1,6 +1,6 @@
 {
   "network": "regtest",
-  "generated": "2026-09-17T16:10:47Z",
+  "generated": "2026-09-17T17:45:44Z",
   "networks": {
     "chaosnet": "10.190.0.0/24",
     "alertnet": "192.0.0.128/26",

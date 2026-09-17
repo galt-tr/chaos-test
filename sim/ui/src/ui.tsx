@@ -1,5 +1,5 @@
 import { useMemo, useState, type ReactNode } from 'react';
-import type { NodeState } from './api';
+import { isSV, type NodeState } from './api';
 import { type ActionState, copy, hashColor, short } from './hooks';
 import { useArcadeBase, useKnownTxids } from './live';
 import { HEX64, NOT_TX_KEYS, isTxKey, linkifyParts } from './txids';
@@ -125,4 +125,27 @@ export function Empty({ children }: { children: ReactNode }) {
 
 export function KV({ k, children, title }: { k: string; children: ReactNode; title?: string }) {
   return <><dt title={title}>{k}</dt><dd>{children}</dd></>;
+}
+
+/** Where to broadcast.
+ *
+ *  Arcade is the default and is listed plainly; every node sits inside a LEGACY group, because
+ *  aiming at a node bypasses arcade entirely. Teranodes take the asset POST /tx and SV nodes
+ *  take sendrawtransaction — genuinely different code paths, so they are labelled differently.
+ */
+export function BroadcastSelect({ nodes, value, onChange, arcade = true }:
+  { nodes: NodeState[]; value: string; onChange: (v: string) => void; arcade?: boolean }) {
+  return (
+    <select value={value} onChange={(e) => onChange(e.target.value)}
+      title="arcade is the normal path; picking a node is the legacy path and skips arcade">
+      <option value="arcade" disabled={!arcade}>arcade {arcade ? '(default)' : '— not configured'}</option>
+      <optgroup label="legacy · straight to one node, bypassing arcade">
+        {nodes.map((n) => (
+          <option key={n.name} value={n.name}>
+            {n.name} — {isSV(n) ? 'SV sendrawtransaction' : 'asset POST /tx'}
+          </option>
+        ))}
+      </optgroup>
+    </select>
+  );
 }

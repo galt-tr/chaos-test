@@ -18,12 +18,15 @@ import (
 	"os"
 	"os/signal"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"syscall"
 	"time"
 
 	"github.com/bsv-blockchain/chaos-test/internal/alerts"
 	"github.com/bsv-blockchain/chaos-test/internal/api"
+	"github.com/bsv-blockchain/chaos-test/internal/arcade"
+	"github.com/bsv-blockchain/chaos-test/internal/automine"
 	"github.com/bsv-blockchain/chaos-test/internal/chaos"
 	"github.com/bsv-blockchain/chaos-test/internal/diag"
 	"github.com/bsv-blockchain/chaos-test/internal/keys"
@@ -31,6 +34,7 @@ import (
 	"github.com/bsv-blockchain/chaos-test/internal/scenario"
 	"github.com/bsv-blockchain/chaos-test/internal/teranode"
 	"github.com/bsv-blockchain/chaos-test/internal/topology"
+	"github.com/bsv-blockchain/chaos-test/internal/walletsvc"
 )
 
 func env(k, d string) string {
@@ -52,6 +56,8 @@ func main() {
 	listen := flag.String("listen", env("LISTEN", ":8600"), "listen address")
 	kafka := flag.String("kafka", env("KAFKA_BROKERS", ""), "kafka brokers for verdict topics (empty = off)")
 	socket := flag.String("socket", env("PODMAN_SOCKET", ""), "container runtime socket (default: auto)")
+	autoMine := flag.Int("automine-seconds", envInt("AUTOMINE_SECONDS", 600), "auto-mine a block every N seconds (0 = off)")
+	walletd := flag.String("walletd", env("WALLETD_URL", "http://10.190.0.52:8700"), "walletd sidecar URL (empty = wallet feature off)")
 	hostMode := flag.Bool("host-mode", env("HOST_MODE", "") == "1", "use host-published URLs (dev on the host)")
 	scenariosDir := flag.String("scenarios", env("SCENARIOS", "scenarios"), "directory of scenario YAML files")
 	flag.Parse()
@@ -61,19 +67,24 @@ func main() {
 	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
 	defer stop()
 
-	if err := run(ctx, lg, *invPath, *keysPath, *dataDir, *listen, *kafka, *socket, *hostMode, *scenariosDir); err != nil {
+	if err := run(ctx, lg, *invPath, *keysPath, *dataDir, *listen, *kafka, *socket, *hostMode, *scenariosDir, *walletd, *autoMine); err != nil {
 		lg.Error("fatal", "err", err)
 		os.Exit(1)
 	}
 }
 
-func run(ctx context.Context, lg *slog.Logger, invPath, keysPath, dataDir, listen, kafka, socket string, hostMode bool, scenariosDir string) error {
+func run(ctx context.Context, lg *slog.Logger, invPath, keysPath, dataDir, listen, kafka, socket string, hostMode bool, scenariosDir, walletdURL string, autoMineSeconds int) error {
 	inv, err := topology.Load(invPath)
 	if err != nil {
 		return err
 	}
 	if hostMode {
 		inv.UseHostURLs()
+		// walletd is published on the host too when the orchestrator runs outside the compose
+		// networks; the in-network default would be unreachable from there.
+		if strings.Contains(walletdURL, "10.190.0.52") {
+			walletdURL = "http://localhost:18700"
+		}
 	}
 	kb, err := os.ReadFile(keysPath)
 	if err != nil {
@@ -129,8 +140,41 @@ func run(ctx context.Context, lg *slog.Logger, invPath, keysPath, dataDir, liste
 		arcadeURL = s.URL
 	}
 	dg := diag.New(diag.Deps{Inv: inv, Fleet: fleet, Runtime: rt})
+
+	// The wallet lives in its own process (walletd): go-wallet-toolbox cannot be compiled into
+	// this module, because chaos-test replaces gorm's sqlite driver for its alert datastore and
+	// the replacement lacks the API the toolbox needs. A missing walletd is not fatal — the
+	// wallet routes report themselves unavailable and everything else keeps working.
+	var arcadeCl *arcade.Client
+	if a, ok := inv.Services["arcade"]; ok && a.URL != "" {
+		arcadeCl = arcade.New(a.URL, a.URLs["chaintracks"].URL)
+	}
+	// The chain keeps moving on a constant cadence for the whole harness, not just while a
+	// wallet send is running: a user watching any page sees the same countdown.
+	am := automine.New(nil, bus, lg, automine.Config{
+		Enabled: autoMineSeconds > 0, Node: firstTeranode(inv), Blocks: 1,
+		Interval: time.Duration(autoMineSeconds) * time.Second,
+	})
+
+	var wsvc *walletsvc.Service
+	if walletdURL != "" {
+		wsvc = walletsvc.New(walletsvc.Config{
+			URL: walletdURL, Bus: bus, Logger: lg, Arcade: arcadeCl,
+			DefaultMineNode: firstTeranode(inv),
+		})
+	}
 	srv := api.New(api.Deps{Inventory: inv, Bus: bus, Fleet: fleet, AlertLog: alog, AlertHost: host, Signing: signing, Genesis: genesisPubs,
-		Keys: ring, Runtime: rt, Logger: lg, Arcade: arcadeURL, Diag: dg})
+		Keys: ring, Runtime: rt, Logger: lg, Arcade: arcadeURL, Diag: dg,
+		Wallet: wsvc, ArcadeClient: arcadeCl, AutoMine: am, BaseCtx: ctx})
+	// The miner is the api server, which does not exist until now.
+	am.SetMiner(srv)
+	go am.Run(ctx)
+	if wsvc != nil {
+		// Bind after construction: the controller needs the api server, and the api server
+		// needs the service, so one of the two has to be wired second.
+		wsvc.Bind(srv)
+		go wsvc.Run(ctx)
+	}
 
 	eng := scenario.NewEngine(scenario.Deps{Inventory: inv, Bus: bus, Fleet: fleet, API: srv, Logger: lg, RunsDir: filepath.Join(dataDir, "runs")})
 	if err := eng.LoadDir(scenariosDir); err != nil {
@@ -170,4 +214,28 @@ func run(ctx context.Context, lg *slog.Logger, invPath, keysPath, dataDir, liste
 		return err
 	}
 	return nil
+}
+
+// firstTeranode is the default node for mining and coinbase funding. SV nodes follow the
+// teranodes and have no asset API, so they are never the default.
+func firstTeranode(inv *topology.Inventory) string {
+	for _, n := range inv.Nodes {
+		if !n.IsSV() {
+			return n.Name
+		}
+	}
+	if len(inv.Nodes) > 0 {
+		return inv.Nodes[0].Name
+	}
+	return ""
+}
+
+// envInt reads an integer environment variable, falling back to def.
+func envInt(k string, def int) int {
+	if v := os.Getenv(k); v != "" {
+		if n, err := strconv.Atoi(v); err == nil {
+			return n
+		}
+	}
+	return def
 }

@@ -11,8 +11,10 @@ import (
 
 	"github.com/bsv-blockchain/chaos-test/internal/alerts"
 	"github.com/bsv-blockchain/chaos-test/internal/api"
+	"github.com/bsv-blockchain/chaos-test/internal/automine"
 	"github.com/bsv-blockchain/chaos-test/internal/chaos"
 	"github.com/bsv-blockchain/chaos-test/internal/teranode"
+	"github.com/bsv-blockchain/chaos-test/internal/walletsvc"
 )
 
 type executor struct {
@@ -444,6 +446,95 @@ func (x *executor) action(ctx context.Context, name string, w map[string]any) (a
 	case "chaos":
 		node := x.node(str(w, "node"))
 		return map[string]any{"ok": true}, a.Chaos(ctx, node, str(w, "action"))
+	case "automine":
+		// Configures the orchestrator-wide mining cadence. A scenario that needs a static
+		// chain turns it off here rather than fighting it.
+		cfg := automine.Config{
+			Enabled:  boolean(w, "enabled"),
+			Interval: time.Duration(num(w, "intervalSeconds", 0)) * time.Second,
+			Node:     x.node(str(w, "node")),
+			Blocks:   int(num(w, "blocks", 0)),
+		}
+		if _, ok := w["enabled"]; !ok {
+			cfg.Enabled = true
+		}
+		st := a.AutoMineConfigure(cfg)
+		return map[string]any{"enabled": st.Enabled, "intervalSeconds": st.IntervalSeconds,
+			"node": st.Node, "nextMineAt": st.NextMineAt, "blocksMined": st.BlocksMined}, nil
+
+	case "wallet_state":
+		st, err := a.WalletState(ctx)
+		if err != nil {
+			return nil, err
+		}
+		return map[string]any{"available": st.Available, "connected": st.Connected,
+			"balance": st.Balance, "coins": st.Coins, "address": st.Address,
+			"acceptRate": st.Health.AcceptRate, "decided": st.Health.Decided}, nil
+
+	case "wallet_topup":
+		req := walletsvc.TopUpRequest{
+			Node: x.node(str(w, "node")), Satoshis: uint64(num(w, "satoshis", 0)),
+			Count: int(num(w, "count", 0)), Fee: uint64(num(w, "fee", 0)),
+			WaitSeconds: int(num(w, "waitSeconds", 0)),
+		}
+		if _, ok := w["mine"]; ok {
+			m := boolean(w, "mine")
+			req.Mine = &m
+		}
+		res, err := a.WalletTopUp(ctx, req)
+		if err != nil {
+			return nil, err
+		}
+		return map[string]any{"txid": res.TxID, "address": res.Address, "satoshis": res.Satoshis,
+			"outputIndex": res.OutputIndex, "internalized": res.Internalized,
+			"balance": res.Balance, "coins": res.Coins, "fanoutTxid": res.FanoutTxID}, nil
+
+	case "wallet_tx":
+		req := walletsvc.TxRequest{
+			Shape: str(w, "shape"), Target: str(w, "target"),
+			Satoshis: uint64(num(w, "satoshis", 0)), To: str(w, "to"),
+			Outputs: int(num(w, "outputs", 0)), Data: str(w, "data"), DataHex: str(w, "dataHex"),
+			Script: str(w, "script"), Label: str(w, "label"), Description: str(w, "description"),
+			Delayed: boolean(w, "delayed"),
+		}
+		if req.Target != "" && req.Target != walletsvc.TargetArcade {
+			req.Target = x.node(req.Target)
+		}
+		res, err := a.WalletTx(ctx, req)
+		if err != nil {
+			return nil, err
+		}
+		return map[string]any{"txid": res.TxID, "shape": res.Shape, "target": res.Target,
+			"accepted": res.Accepted, "walletStatus": res.WalletStatus, "status": res.Status,
+			"body": res.Body, "noSend": res.NoSend}, nil
+
+	case "wallet_send_start":
+		req := walletsvc.SendRequest{
+			TPS: num2f(w, "tps", 1), Workers: int(num(w, "workers", 0)),
+			Shape: str(w, "shape"), Satoshis: uint64(num(w, "satoshis", 0)),
+			Outputs: int(num(w, "outputs", 0)), To: str(w, "to"), Data: str(w, "data"),
+			Label: str(w, "label"), DurationSeconds: int(num(w, "durationSeconds", 0)),
+			AutoMineSeconds: int(num(w, "autoMineSeconds", 0)),
+			MineNode:        x.node(str(w, "mineNode")), MineBlocks: int(num(w, "mineBlocks", 0)),
+			StartedBy: "scenario:" + x.r.ScenarioID,
+		}
+		st, err := a.WalletSendStart(ctx, req)
+		if err != nil {
+			return nil, err
+		}
+		return map[string]any{"running": st.Running, "tps": st.TPS, "workers": st.Workers,
+			"labels": st.Labels, "startedAt": st.StartedAt}, nil
+
+	case "wallet_send_stop":
+		st, err := a.WalletSendStop(ctx, time.Duration(num(w, "timeoutSeconds", 20))*time.Second)
+		if err != nil {
+			return nil, err
+		}
+		return map[string]any{"running": st.Running, "draining": st.Draining,
+			"attempted": st.Attempted, "succeeded": st.Succeeded, "failed": st.Failed,
+			"backpressure": st.Backpressure, "canceled": st.Canceled,
+			"measuredTps": st.MeasuredTPS, "elapsedSeconds": st.ElapsedSec}, nil
+
 	case "watch":
 		x.e.d.Fleet.Watch(str(w, "txid"), uint32(num(w, "vout", 0)), str(w, "label"))
 		return map[string]any{"ok": true}, nil
@@ -666,6 +757,41 @@ func (x *executor) check(ctx context.Context, name string, w map[string]any, sin
 			case <-ctx.Done():
 			}
 		}
+	case "wallet_balance":
+		st, err := x.e.d.API.WalletState(ctx)
+		if err != nil {
+			return false, err.Error()
+		}
+		if _, ok := w["atLeast"]; ok {
+			want := uint64(num(w, "atLeast", 0))
+			if st.Balance < want {
+				return false, fmt.Sprintf("balance %d < %d", st.Balance, want)
+			}
+		}
+		if _, ok := w["coinsAtLeast"]; ok {
+			want := uint32(num(w, "coinsAtLeast", 0))
+			if st.Coins < want {
+				return false, fmt.Sprintf("%d spendable coin(s) < %d", st.Coins, want)
+			}
+		}
+		return true, fmt.Sprintf("balance %d over %d coin(s)", st.Balance, st.Coins)
+
+	case "wallet_tx_status":
+		txid := str(w, "txid")
+		row, err := x.e.d.API.WalletTxStatus(ctx, txid)
+		if err != nil {
+			return false, err.Error()
+		}
+		// Wallet and network truth are checked separately on purpose: an action the wallet
+		// calls completed can still be one the network refused.
+		if want := str(w, "wallet"); want != "" && row.WalletStatus != want {
+			return false, fmt.Sprintf("wallet says %q, want %q", row.WalletStatus, want)
+		}
+		if want := str(w, "arcade"); want != "" && row.ArcadeStatus != want {
+			return false, fmt.Sprintf("arcade says %q, want %q", row.ArcadeStatus, want)
+		}
+		return true, fmt.Sprintf("wallet=%s arcade=%s", row.WalletStatus, row.ArcadeStatus)
+
 	case "expr":
 		l, r := str(w, "left"), str(w, "right")
 		op := str(w, "op")
@@ -760,4 +886,28 @@ func truncNote(truncated bool) string {
 		return " (log window truncated; count is a lower bound)"
 	}
 	return ""
+}
+
+// num2f reads a fractional value, so a rate like 0.2 tx/s survives the YAML round trip —
+// num() truncates to an integer, which would silently turn 0.5 tx/s into 0.
+func num2f(w map[string]any, key string, def float64) float64 {
+	v, ok := w[key]
+	if !ok {
+		return def
+	}
+	switch n := v.(type) {
+	case float64:
+		return n
+	case float32:
+		return float64(n)
+	case int:
+		return float64(n)
+	case int64:
+		return float64(n)
+	case string:
+		if f, err := strconv.ParseFloat(n, 64); err == nil {
+			return f
+		}
+	}
+	return def
 }

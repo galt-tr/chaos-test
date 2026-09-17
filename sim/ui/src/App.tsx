@@ -9,10 +9,13 @@ import { ChaosPage } from './pages/Chaos';
 import { ScenariosPage } from './pages/Scenarios';
 import { LogsPage } from './pages/Logs';
 import { DiagnosticsPage } from './pages/Diagnostics';
+import { WalletPage } from './pages/Wallet';
+import { AutoMineChip } from './automine';
 
 const ROUTES: { id: string; label: string; page: () => JSX.Element }[] = [
   { id: 'fleet', label: 'Fleet', page: FleetPage },
   { id: 'alerts', label: 'Alerts', page: AlertsPage },
+  { id: 'wallet', label: 'Wallet', page: WalletPage },
   { id: 'chain', label: 'Chain & UTXOs', page: ChainPage },
   { id: 'chaos', label: 'Chaos', page: ChaosPage },
   { id: 'scenarios', label: 'Scenarios', page: ScenariosPage },
@@ -53,6 +56,7 @@ export function App() {
           {ROUTES.map((r) => <a key={r.id} href={`#/${r.id}`} className={r.id === current.id ? 'active' : ''}>{r.label}</a>)}
         </nav>
         <span className="spacer" />
+        <AutoMineChip />
         <span className="muted small">
           {snap ? <>{snap.network} · {snap.nodes.length} nodes · </> : null}
           {updated !== null ? <>updated <b className={live.connected ? '' : 'warn'}>{updated}</b> ago</> : 'waiting for snapshot…'}

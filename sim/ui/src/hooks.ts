@@ -1,7 +1,9 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
-import { api, type Event, type Snapshot } from './api';
+import { api, type AutoMine, type Event, type Snapshot } from './api';
 
 export type Live = {
+  /** The orchestrator-wide mining cadence, so the header countdown works on every page. */
+  autoMine: AutoMine | null;
   snapshot: Snapshot | null;
   events: Event[];
   /** true while the SSE stream is open and delivering. */
@@ -22,6 +24,7 @@ export type Live = {
  */
 export function useLive(): Live {
   const [snapshot, setSnapshot] = useState<Snapshot | null>(null);
+  const [autoMine, setAutoMine] = useState<AutoMine | null>(null);
   const [events, setEvents] = useState<Event[]>([]);
   const [connected, setConnected] = useState(false);
   const [lastMessageAt, setLastMessageAt] = useState(0);
@@ -94,7 +97,26 @@ export function useLive(): Live {
 
     return () => { stopped = true; es?.close(); if (timer) clearTimeout(timer); clearInterval(poll); };
   }, []);
-  return { snapshot, events, connected, lastMessageAt, restarts };
+  // The mining cadence is polled rather than pushed: nextMineAt is an absolute instant, so the
+  // countdown is computed locally and this only needs to notice a reconfiguration or the
+  // roll-over into the next interval.
+  useEffect(() => {
+    const read = () => {
+      api.autoMine().then((a) => {
+        // Translate the deadline into this browser's clock once, here, using the round-trip's
+        // own `now`. Doing it at render time instead cancels out the live term and freezes the
+        // countdown; doing it here also absorbs any clock difference with the container.
+        const offset = a.now ? new Date(a.now).getTime() - Date.now() : 0;
+        const local = a.nextMineAt ? new Date(a.nextMineAt).getTime() - offset : undefined;
+        setAutoMine({ ...a, nextMineAtLocal: local });
+      }).catch(() => {});
+    };
+    read();
+    const t = setInterval(read, 15000);
+    return () => clearInterval(t);
+  }, []);
+
+  return { autoMine, snapshot, events, connected, lastMessageAt, restarts };
 }
 
 export function useInterval(fn: () => void, ms: number) {
@@ -136,6 +158,30 @@ export function useVisible(): boolean {
     return () => document.removeEventListener('visibilitychange', f);
   }, []);
   return vis;
+}
+
+/** Frees a button when the server accepts the connection and then goes quiet. `req()` sends no
+ *  AbortSignal, so without this a long call pins the UI for the server's whole timeout. The
+ *  request is NOT cancelled — only stopped being waited on. */
+export function withTimeout<T>(p: Promise<T>, ms: number): Promise<T> {
+  return Promise.race([p, new Promise<T>((_, reject) => setTimeout(
+    () => reject(new Error(`no response after ${Math.round(ms / 1000)}s — the call may still be running on the orchestrator`)), ms))]);
+}
+
+/** useState that survives a page remount.
+ *
+ *  <main key={route}> remounts the whole page on every tab switch, which would otherwise lose a
+ *  half-typed OP_RETURN payload or a configured send rate the moment you glance at Fleet.
+ *  sessionStorage keeps it per-tab, which matches how long a debugging session lives. */
+export function useSticky(key: string, initial: string): [string, (v: string) => void] {
+  const [v, setV] = useState(() => {
+    try { return sessionStorage.getItem(key) ?? initial; } catch { return initial; }
+  });
+  const set = useCallback((next: string) => {
+    setV(next);
+    try { sessionStorage.setItem(key, next); } catch { /* private mode */ }
+  }, [key]);
+  return [v, set];
 }
 
 export function useRoute(fallback = 'fleet') {
@@ -199,7 +245,7 @@ export function hashColor(hash?: string) {
 }
 
 /** Event kinds published on the orchestrator bus (others may appear; the feed adds them dynamically). */
-export const EVENT_KINDS = ['tip', 'alert_seq', 'utxo', 'rejected_tx', 'invalid_block', 'chaos', 'alert', 'mine', 'tx', 'scenario', 'log', 'error'];
+export const EVENT_KINDS = ['tip', 'alert_seq', 'utxo', 'rejected_tx', 'invalid_block', 'chaos', 'alert', 'mine', 'tx', 'wallet', 'wallet_divergence', 'scenario', 'log', 'error'];
 
 export function copy(text: string) {
   try { void navigator.clipboard?.writeText(text); } catch { /* clipboard unavailable (insecure context) */ }

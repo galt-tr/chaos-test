@@ -18,12 +18,15 @@ import (
 	"time"
 
 	"github.com/bsv-blockchain/chaos-test/internal/alerts"
+	"github.com/bsv-blockchain/chaos-test/internal/arcade"
+	"github.com/bsv-blockchain/chaos-test/internal/automine"
 	"github.com/bsv-blockchain/chaos-test/internal/chaos"
 	"github.com/bsv-blockchain/chaos-test/internal/observe"
 	"github.com/bsv-blockchain/chaos-test/internal/svnode"
 	"github.com/bsv-blockchain/chaos-test/internal/teranode"
 	"github.com/bsv-blockchain/chaos-test/internal/topology"
 	"github.com/bsv-blockchain/chaos-test/internal/wallet"
+	"github.com/bsv-blockchain/chaos-test/internal/walletsvc"
 )
 
 //go:embed uidist
@@ -49,6 +52,16 @@ type Deps struct {
 	Logger    *slog.Logger
 	Arcade    string    // arcade base URL (POST /tx), may be empty
 	Diag      Diagnoser // nil disables /api/diagnostics
+	// Wallet is the go-wallet-toolbox sidecar handle; nil disables /api/wallet/*.
+	Wallet *walletsvc.Service
+	// ArcadeClient reads arcade's per-transaction status. nil disables the network-truth half
+	// of the wallet page, which then honestly reports "not checked" rather than guessing.
+	ArcadeClient *arcade.Client
+	// AutoMine keeps the chain moving on a constant cadence, independent of any page or run.
+	AutoMine *automine.Service
+	// BaseCtx outlives any single request: a sustained send must survive the call that
+	// started it and the browser tab that made the call.
+	BaseCtx context.Context
 }
 
 // Server is the HTTP API.
@@ -114,6 +127,11 @@ func New(d Deps) *Server {
 	m.HandleFunc("POST /api/chaos/{action}", s.postChaos)
 	m.HandleFunc("GET /api/logs", s.getLogs)
 	m.HandleFunc("GET /api/diagnostics", s.getDiagnostics)
+	m.HandleFunc("GET /api/automine", func(w http.ResponseWriter, _ *http.Request) {
+		writeJSON(w, 200, s.autoMineStatus())
+	})
+	m.HandleFunc("POST /api/automine", s.postAutoMine)
+	s.walletRoutes(m)
 	sub, _ := fs.Sub(uiFS, "uidist")
 	fileServer := http.FileServer(http.FS(sub))
 	m.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
@@ -305,6 +323,9 @@ func (s *Server) getState(w http.ResponseWriter, _ *http.Request) {
 		"alertHost": s.d.AlertHost != nil,
 		"logs":      logsInfo,
 		"diag":      s.d.Diag != nil,
+		// The whole UI shows a live countdown to the next auto-mined block, so this rides
+		// the snapshot every page already polls rather than needing its own request.
+		"autoMine": s.autoMineStatus(),
 	})
 }
 

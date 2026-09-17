@@ -150,3 +150,41 @@ code.code { color: var(--bad); background: #3d1418; border-radius: 4px; padding:
 tr.off td { opacity: .55; }
 .srcs { display: flex; gap: 6px; flex-wrap: wrap; }
 .verdict { font-size: 14px; }
+
+/* ---- wallet page --------------------------------------------------------------------- */
+/* Arcade's lifecycle. Green is reserved for MINED/IMMUTABLE: nothing earlier is a network
+   verdict, and no wallet status earns green at all. REJECTED is amber rather than red because
+   arcade supersedes it with a later SEEN_*, so it is provisional by construction. */
+.pill.status-MINED, .pill.status-IMMUTABLE { border-color:var(--ok); color:var(--ok); }
+.pill.status-SENT_TO_NETWORK, .pill.status-ACCEPTED_BY_NETWORK, .pill.status-SEEN_ON_NETWORK,
+.pill.status-SEEN_MULTIPLE_NODES, .pill.status-STUMP_PROCESSING { border-color:var(--accent); color:var(--accent); }
+.pill.status-REJECTED, .pill.status-PENDING_RETRY { border-color:var(--warn); color:var(--warn); }
+.pill.status-DOUBLE_SPEND_ATTEMPTED { border-color:var(--bad); color:var(--bad); }
+.pill.status-RECEIVED, .pill.status-UNKNOWN, .pill.status-NOT_FOUND { color:var(--muted); }
+/* A value outside the documented enum: visibly unrecognised, never silently ok. */
+.pill.unknown { border-style:dashed; color:var(--muted); }
+/* Wallet buckets are bookkeeping; only a real wallet-side failure gets colour. */
+.pill.wb-failed, .pill.wb-aborted { border-color:var(--bad); color:var(--bad); }
+.pill.wb-nosend { border-color:var(--warn); color:var(--warn); }
+.dual { display:inline-flex; align-items:center; gap:4px; white-space:nowrap; }
+.dual .sep { color:var(--muted); }
+/* Neutral sibling of .accepted/.rejection: stored by the wallet, no network verdict yet. */
+.pending { background:#10253d; border:1px solid #1f6feb; color:#a5d6ff; padding:8px 10px; border-radius:6px; margin-top:6px; }
+.counters { display:grid; grid-template-columns:repeat(auto-fit, minmax(94px, 1fr)); gap:8px; margin:8px 0; }
+.counters .c { border:1px solid var(--line); border-radius:6px; padding:6px 8px; }
+.counters .c b { display:block; font-size:18px; font-variant-numeric:tabular-nums; }
+.counters .c span { display:block; color:var(--muted); font-size:10.5px; text-transform:uppercase; letter-spacing:.05em; }
+.num { font-variant-numeric:tabular-nums; }
+.big { font-size:22px; font-weight:600; font-variant-numeric:tabular-nums; }
+/* Coins running out is backpressure, not failure: amber, never the red .bad treatment. */
+.bar.warnfill i { background:var(--warn); }
+.ev.kind-wallet .k { color:var(--frozen); }
+.ev.kind-wallet_divergence .k { color:var(--bad); }
+
+/* Header auto-mine countdown: present on every page, because the cadence is global. */
+.automine { display:inline-flex; align-items:center; gap:6px; font-size:12px; text-decoration:none;
+  color:var(--fg); border:1px solid var(--line); border-radius:6px; padding:3px 8px; }
+.automine:hover { border-color:var(--accent); }
+.automine b { font-variant-numeric:tabular-nums; }
+.automine.due b { color:var(--warn); }
+.automine.off { color:var(--muted); border-style:dashed; }

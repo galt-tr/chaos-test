@@ -12,12 +12,12 @@ COMPOSE        := podman compose -f $(STACK)/compose.yaml
 # compose profiles started by `make up`; e.g. make up PROFILES="--profile tools"
 PROFILES       ?= --profile tools --profile arcade --profile merkle --profile wallet
 
-.PHONY: gen build build-tools build-teranode build-alert-system up down wait status logs tools test tidy
+.PHONY: gen build build-tools build-teranode build-alert-system walletd-build up down wait status logs tools test test-walletd tidy
 
 gen: ## regenerate stack/compose.yaml + config for N teranodes and SV SV nodes (keys are kept)
 	go run ./cmd/gen -n $(N) -sv $(SV) -out $(STACK) -teranode-image localhost/teranode-chaos:$(TERANODE_TAG) -svnode-image $(SVNODE_IMAGE)
 
-build: build-tools build-alert-system build-teranode ## build all images
+build: build-tools build-alert-system build-teranode walletd-build ## build all images
 
 build-tools: ## alertctl + stackctl image
 	podman build -t localhost/chaos-test:local .
@@ -47,7 +47,11 @@ up: ## start the stack (teranodes, SV nodes + sidecars, kafka, alert hub) + prof
 	@# docker-compose (podman's preferred provider when installed) drops it, leaving the
 	@# dir owned by root inside the userns. Do the remap ourselves, provider-independent.
 	@podman unshare chown -R 65534:65534 $(STACK)/.data/alert-system
-	@for j in $$(seq 1 $(SV)); do mkdir -p $(STACK)/.data/svnode$$j $(STACK)/.data/alert-svnode$$j; done
+	@# same remap for every sidecar's data dir: the hub image runs as USER 65534 and the
+	@# :U on .data/alert-svnodeJ is dropped by docker-compose, so the sidecar cannot create
+	@# its SQLite db ("unable to open database file") and exits.
+	@for j in $$(seq 1 $(SV)); do mkdir -p $(STACK)/.data/svnode$$j $(STACK)/.data/alert-svnode$$j; \
+	  podman unshare chown -R 65534:65534 $(STACK)/.data/alert-svnode$$j; done
 	cd $(STACK) && podman compose $(PROFILES) up -d
 
 down: ## stop and remove the stack (keeps .data/)
@@ -74,8 +78,14 @@ logs: ## follow all logs
 tools: ## shell in the tools container
 	podman exec -it chaos-tools bash
 
+walletd-build: ## walletd image (the go-wallet-toolbox wallet sidecar; its own Go module)
+	podman build -t localhost/chaos-walletd:local -f sim/walletd/Dockerfile sim/walletd
+
 test:
 	CGO_ENABLED=0 go test ./cmd/... ./internal/...
+
+test-walletd: ## walletd is a nested module, so the main `go test ./...` does not reach it
+	cd sim/walletd && CGO_ENABLED=0 go test ./...
 
 tidy:
 	go mod tidy

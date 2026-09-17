@@ -1,0 +1,85 @@
+id: wallet-sustained-flow
+name: A sustained wallet flow keeps blocks non-empty and the fleet converged
+description: >
+  Fund the BRC-100 wallet from a mature coinbase, split it wide and shallow, then run a low-rate
+  send through arcade with auto-mining. Asserts on what the NETWORK did, not on what createAction
+  returned: the wallet reports an action stored well before any node has seen it, so a high
+  "succeeded" count proves nothing on its own.
+requires: [regtest]
+roles:
+  A: teranode1
+  B: teranode2
+  C: teranode3
+params:
+  tps: 1
+  seconds: 180
+  autoMine: 60
+steps:
+  - name: converge the fleet before measuring anything
+    action: mine
+    with: { node: A, blocks: 2 }
+    assert:
+      - { check: same_tip, with: { nodes: [A, B, C] }, timeout: 90s }
+
+  - name: top up the wallet (mines to maturity, mines the funding block, waits for the proof)
+    action: wallet_topup
+    with: { node: A, satoshis: 4000000, count: 12, mine: true, waitSeconds: 180 }
+    as: fund
+    timeout: 10m
+    assert:
+      # Coins, not balance: a send is limited by spendable outputs.
+      - { check: wallet_balance, with: { atLeast: 1000000, coinsAtLeast: 6 }, timeout: 120s }
+      - check: wallet_tx_status
+        with: { txid: "${fund.txid}", arcade: MINED }
+        timeout: 120s
+        message: the funding transaction reached a block
+
+  - name: mark
+    action: mark
+    as: m0
+
+  - name: start the sustained send
+    action: wallet_send_start
+    with:
+      tps: "${tps}"
+      workers: 2
+      shape: opreturn
+      autoMineSeconds: "${autoMine}"
+      mineNode: A
+    as: blast
+
+  - name: let it flow
+    action: wait
+    with: { seconds: "${seconds}" }
+
+  - name: stop and read the honest counters
+    action: wallet_send_stop
+    with: { timeoutSeconds: 30 }
+    as: stopped
+    assert:
+      - check: expr
+        with: { left: "${stopped.draining}", op: "==", right: "false" }
+        message: the send drained cleanly rather than aborting work in flight
+      - check: expr
+        with: { left: "${stopped.failed}", op: "==", right: "0" }
+        message: no send failed
+        should: true
+
+  - name: the flow actually landed on chain
+    action: note
+    with:
+      message: >
+        attempted=${stopped.attempted} walletTook=${stopped.succeeded} failed=${stopped.failed}
+        waiting=${stopped.backpressure} blocks=${stopped.blocksMined}
+    assert:
+      - check: event
+        with: { kind: mine, contains: "wallet auto-mine", since: "${m0.eventId}", min: 1 }
+        timeout: 30s
+        message: the auto-miner produced at least one block during the run
+      # A divergence means the wallet and the network disagree about a transaction. Recorded as
+      # a finding rather than a failure: seeing one is the point of the harness.
+      - check: no_event
+        with: { kind: wallet_divergence, since: "${m0.eventId}" }
+        should: true
+        message: the wallet and the network agreed about every transaction
+      - { check: same_tip, with: { nodes: [A, B, C] }, timeout: 180s }

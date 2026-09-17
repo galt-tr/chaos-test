@@ -126,16 +126,111 @@ export type DiagReport = { nodes: Diagnostics[]; fleet: FleetContext; fetchedAt:
 /** Error bodies carry a machine-readable `reason`; branch on it, never on the message. */
 export type ApiFailure = { error: string; reason?: string; runtime?: string; container?: string };
 
+
+// ---- wallet -------------------------------------------------------------------------------
+
+/** An error carrying the server's machine-readable reason. Branch on `reason`, never on text. */
+export type ApiError = Error & { reason?: string; status?: number };
+
+/** The orchestrator-wide mining cadence. It is a metronome: a constant interval, unaffected by
+ *  manual mining, scenario mining or a wallet send. `nextMineAt` is absolute and `now` is the
+ *  server's clock, so a client can run its own countdown without trusting poll timing or its
+ *  own clock agreeing with the container's. */
+export type AutoMine = {
+  enabled: boolean; intervalSeconds: number; node: string; blocks: number;
+  nextMineAt?: string; now: string; lastMinedAt?: string;
+  blocksMined: number; runs: number; lastError?: string;
+  /** Set by the client, not the server: `nextMineAt` translated into this browser's clock at
+   *  the moment the response arrived. The countdown subtracts Date.now() from this, which is
+   *  what makes it tick between polls — comparing two server timestamps yields a constant. */
+  nextMineAtLocal?: number;
+};
+
+export type WalletCoin = { outpoint: string; satoshis: number; spendable: boolean };
+
+/** Wallet-side bookkeeping for one action. NOT a network verdict: createAction returns as soon
+ *  as the action is stored, which can be before any node has seen it. */
+export type WalletHealth = {
+  labels: string[]; total: number; sampled: number;
+  buckets: Record<string, number>;
+  accepted: number; decided: number;
+  /** -1 when nothing is decided. A percentage without a denominator would be invented. */
+  acceptRate: number; sampledAt: string;
+};
+
+/** Wallet truth and network truth, side by side. They are never merged. */
+export type TxRow = {
+  txid: string; shape?: string; target?: string; satoshis: number;
+  walletStatus?: string;
+  /** "" means never asked — not "fine". */
+  arcadeStatus?: string;
+  blockHeight?: number; extraInfo?: string; competingTxs?: string[];
+  diverged: boolean; terminal: boolean; createdAt: string; arcadeCheckedAt?: string;
+};
+
+export type SendStatus = {
+  running: boolean; draining: boolean; inFlight: number;
+  tps: number; workers: number; shape?: string; target?: string; labels?: string[]; startedBy?: string;
+  startedAt?: string; stoppedAt?: string; elapsedSeconds: number; stopReason?: string; now: string;
+  attempted: number; succeeded: number; failed: number; backpressure: number; canceled: number;
+  measuredTps: number; lastError?: string;
+  coinsAtStart: number; coinsRemaining: number; waitingForFunds: boolean; waitingSince?: string;
+};
+
+export type WalletState = {
+  available: boolean; connected: boolean; error?: string; reason?: string;
+  network?: string; identityKey?: string; address?: string;
+  balance: number; coins: number;
+  health: WalletHealth; send: SendStatus; recent: TxRow[] | null;
+  coins_list?: WalletCoin[] | null; checkedAt?: string;
+};
+
+export type WalletDeposit = {
+  network: string; address: string; lockingScriptHex: string;
+  derivationPrefixB64: string; derivationSuffixB64: string; suggestedSatoshis: number;
+};
+
+export type TopUpStep = { name: string; ok: boolean; detail?: string; elapsed?: string };
+export type TopUpResult = {
+  txid: string; address: string; satoshis: number; outputIndex: number;
+  coinbaseTxid?: string; coinbaseHeight?: number; internalized: boolean;
+  fanoutTxid?: string; coins: number; balance: number; steps: TopUpStep[] | null;
+};
+
+export type TxShape = 'payment' | 'opreturn' | 'fanout' | 'custom';
+export type WalletTxRequest = {
+  shape: TxShape; target?: string; satoshis?: number; to?: string; outputs?: number;
+  data?: string; dataHex?: string; script?: string; label?: string; description?: string;
+};
+export type WalletTxResult = {
+  txid: string; shape: string; target: string; accepted: boolean;
+  walletStatus?: string; status?: number; body?: string; rawHex?: string;
+  satoshis: number; noSend: boolean;
+};
+export type SendRequest = {
+  tps: number; workers?: number; shape: TxShape; satoshis?: number; outputs?: number;
+  data?: string; label?: string; durationSeconds?: number;
+};
+
 async function req<T>(method: string, path: string, body?: unknown): Promise<T> {
   const r = await fetch(path, { method, headers: body ? { 'Content-Type': 'application/json' } : undefined, body: body ? JSON.stringify(body) : undefined });
   const text = await r.text();
   let data: unknown = text;
   try { data = JSON.parse(text); } catch { /* keep text */ }
-  if (!r.ok) throw new Error((data as { error?: string })?.error ?? `${r.status} ${text}`);
+  if (!r.ok) {
+    // Attach the machine-readable reason so callers can branch on a code instead of on
+    // message text. Throwing a bare Error here discarded it, which left every `reason`
+    // branch in the app unreachable.
+    const f = data as { error?: string; reason?: string } | undefined;
+    const e = new Error(f?.error ?? `${r.status} ${text}`) as ApiError;
+    e.reason = f?.reason;
+    e.status = r.status;
+    throw e;
+  }
   return data as T;
 }
 export const api = {
-  state: () => req<{ snapshot: Snapshot; alerts: AlertSummary[] | null; runtime: string; alertHost: boolean }>('GET', '/api/state'),
+  state: () => req<{ snapshot: Snapshot; alerts: AlertSummary[] | null; runtime: string; alertHost: boolean; autoMine?: AutoMine }>('GET', '/api/state'),
   inventory: () => req<Inventory>('GET', '/api/inventory'),
   recent: (n = 300) => req<Event[]>('GET', `/api/events/recent?n=${n}`),
   mine: (node: string, blocks: number, address?: string) => req<{ node: string; hashes: string[] }>('POST', '/api/mine', { node, blocks, address }),
@@ -160,6 +255,21 @@ export const api = {
   run: (id: string) => req<Run>('GET', `/api/runs/${id}`),
   runNext: (id: string) => req('POST', `/api/runs/${id}/next`),
   runAbort: (id: string) => req('POST', `/api/runs/${id}/abort`),
+  walletState: () => req<WalletState>('GET', '/api/wallet/state'),
+  walletDeposit: () => req<WalletDeposit>('GET', '/api/wallet/deposit'),
+  walletTopUp: (body: { node?: string; satoshis: number; count?: number; mine?: boolean; waitSeconds?: number }) =>
+    req<TopUpResult>('POST', '/api/wallet/topup', body),
+  walletInternalize: (body: { txid: string; outputIndex?: number; waitSeconds?: number }) =>
+    req<TopUpResult>('POST', '/api/wallet/topup/internalize', body),
+  walletTx: (body: WalletTxRequest) => req<WalletTxResult>('POST', '/api/wallet/tx', body),
+  walletTxStatus: (txid: string) => req<TxRow>('GET', `/api/wallet/tx/${txid}`),
+  autoMine: () => req<AutoMine>('GET', '/api/automine'),
+  setAutoMine: (body: { enabled?: boolean; intervalSeconds?: number; node?: string; blocks?: number }) =>
+    req<AutoMine>('POST', '/api/automine', body),
+  sendStatus: () => req<SendStatus>('GET', '/api/wallet/send'),
+  sendStart: (body: SendRequest) => req<SendStatus>('POST', '/api/wallet/send/start', body),
+  sendStop: () => req<SendStatus>('POST', '/api/wallet/send/stop'),
+
   logs: (q: LogQuery) => {
     const p = new URLSearchParams({ node: q.node });
     if (q.cursor) p.set('cursor', q.cursor);

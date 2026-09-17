@@ -8,7 +8,7 @@
  */
 import { useRef, useState } from 'react';
 import { api, isSV, type NodeState } from './api';
-import type { useActions } from './hooks';
+import { withTimeout, type useActions } from './hooks';
 import { Status, Tip } from './ui';
 
 /** Namespaced useActions key so per-node state never collides: `mine:teranode1`. */
@@ -16,15 +16,6 @@ export const akey = (action: string, node: string) => `${action}:${node}`;
 
 type Runner = ReturnType<typeof useActions>;
 export type ActionProps = { n: NodeState; status: Runner['status']; run: Runner['run'] };
-
-/** Frees the button when a node accepts the connection but never answers — a SIGSTOP'd container
- *  completes the TCP handshake and then goes silent. The orchestrator's handler and its RPC client
- *  both allow 5 minutes and `req()` sends no AbortSignal, so without this a mis-timed click sits on
- *  `mining…` for that long. The request is NOT cancelled, only stopped being waited on. */
-function withTimeout<T>(p: Promise<T>, ms: number): Promise<T> {
-  return Promise.race([p, new Promise<T>((_, reject) => setTimeout(
-    () => reject(new Error(`no response after ${ms / 1000}s — the node may be paused; the mine may still be running`)), ms))]);
-}
 
 /**
  * On-demand mining for one node: a button, inline status, and the hash of the block just produced.

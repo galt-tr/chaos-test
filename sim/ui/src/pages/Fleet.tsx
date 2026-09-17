@@ -3,6 +3,7 @@ import { isSV, type Event, type NodeState, type Snapshot } from '../api';
 import { useLiveCtx } from '../live';
 import { EVENT_KINDS, ago, fmtTime, hashColor, useActions } from '../hooks';
 import { NodeControls, type ActionProps } from '../nodeactions';
+import { AutoMinePanel } from '../automine';
 import { Empty, Hash, JsonTree, Linkify, Pill, Tip, TxList } from '../ui';
 
 /** For rejected-tx verdicts the `hash` field is a txid. */
@@ -23,6 +24,7 @@ export function FleetPage() {
   return (
     <>
       <Consensus snap={snapshot} />
+      <AutoMinePanel nodes={snapshot.nodes} />
       <div className="grid nodes">
         {snapshot.nodes.map((n) => <NodeCard key={n.name} n={n} status={status} run={run} />)}
         <HubCard snap={snapshot} />

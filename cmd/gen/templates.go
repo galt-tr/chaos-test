@@ -259,6 +259,37 @@ services:
     mem_limit: ${WALLET_MEM_LIMIT:-512m}
     restart: on-failure
 
+  walletd:
+    # The BRC-100 wallet the Wallet page drives. It holds the harness's wallet identity and
+    # talks to wallet-infra (a storage server, not a wallet server) over BRC-103 mutual auth,
+    # which the toolbox client performs itself. Broadcasting is wallet-infra's job and it is
+    # already configured to post to arcade.
+    #
+    # Its own image because it is its own Go module: go-wallet-toolbox cannot be compiled into
+    # the orchestrator, which replaces gorm's sqlite driver for its alert datastore with one
+    # that lacks the API the toolbox needs.
+    image: ${WALLETD_IMAGE:-localhost/chaos-walletd:local}
+    container_name: chaos-walletd
+    profiles: ["wallet"]
+    networks:
+      chaosnet:
+        ipv4_address: 10.190.0.52
+      ctlnet:
+        ipv4_address: 10.191.0.52
+    depends_on:
+      wallet-infra:
+        condition: service_started
+    environment:
+      WALLET_INFRA_URL: http://10.191.0.42:8100
+      BSV_NETWORK: tstn
+      LISTEN: ":8700"
+    volumes:
+      - ./config:/config:ro,Z
+    ports:
+      - "${WALLETD_HOST_PORT:-18700}:8700"
+    mem_limit: ${WALLETD_MEM_LIMIT:-256m}
+    restart: on-failure
+
   tools:
     # alertctl + stackctl on the alert and control networks. Profile: tools.
     image: ${TOOLS_IMAGE:-localhost/chaos-test:local}

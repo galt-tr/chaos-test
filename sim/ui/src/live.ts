@@ -2,7 +2,7 @@ import { createContext, createElement, useContext, useMemo, type ReactNode } fro
 import type { Live } from './hooks';
 
 /** The single SSE-backed live state, provided by <App> and read by every page. */
-export const LiveCtx = createContext<Live>({ snapshot: null, events: [], connected: false, lastMessageAt: 0, restarts: 0 });
+export const LiveCtx = createContext<Live>({ autoMine: null, snapshot: null, events: [], connected: false, lastMessageAt: 0, restarts: 0 });
 export function useLiveCtx() { return useContext(LiveCtx); }
 
 /** Full txids the UI has seen in structured data (watched outpoints, event data, alert funds,
