@@ -361,6 +361,18 @@ func (x *executor) action(ctx context.Context, name string, w map[string]any) (a
 	case "spend":
 		req := api.SpendRequest{Node: x.node(str(w, "node")), TxID: str(w, "txid"), Vout: uint32(num(w, "vout", 0)), Key: str(w, "key"),
 			To: str(w, "to"), ToScript: str(w, "toScript"), Satoshis: uint64(num(w, "satoshis", 0)), Fee: uint64(num(w, "fee", 0)), Outputs: int(num(w, "outputs", 1))}
+		// `outs` spells the outputs out one by one, which is the only way to ask for a genuine
+		// zero-satoshi output: the shorthand above splits one amount evenly and reads
+		// satoshis 0 as "all minus fee". wallet.Spend still appends the change output.
+		if raw, ok := w["outs"].([]any); ok {
+			for _, it := range raw {
+				om, _ := it.(map[string]any)
+				if om == nil {
+					continue
+				}
+				req.Outs = append(req.Outs, api.OutputSpec{Script: str(om, "script"), To: str(om, "to"), Satoshis: uint64(num(om, "satoshis", 0))})
+			}
+		}
 		res, err := a.Spend(ctx, req)
 		if err != nil {
 			return nil, err

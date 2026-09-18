@@ -72,6 +72,7 @@ type svView struct {
 	AlertKey       string // the sidecar's ed25519 private key
 	HostRPC        int
 	HostSidecarAPI int
+	StrictPolicy   bool // enforce standard-output policy (acceptnonstdoutputs=0)
 }
 
 type view struct {
@@ -255,6 +256,13 @@ func run(n, sv int, out, image, svImage, discovery string) error {
 	for _, node := range inv.SVNodes() {
 		v.SVNodes = append(v.SVNodes, svView{Node: node, AlertKey: kf.SVNodes[node.Name].Alert.PrivateKeyHex,
 			HostRPC: node.HostBase + 332, HostSidecarAPI: node.HostBase + 300})
+	}
+	// The LAST SV node enforces standard-output policy, so the fleet always contains one node
+	// that rejects a zero-satoshi bare OP_RETURN output while every other node keeps SV Node's
+	// permissive post-Genesis default. Requires at least two SV nodes so a permissive one
+	// remains for comparison; with -sv 1 the single node stays at the default.
+	if len(v.SVNodes) >= 2 {
+		v.SVNodes[len(v.SVNodes)-1].StrictPolicy = true
 	}
 
 	if err := render(composeTmpl, filepath.Join(out, "compose.yaml"), v); err != nil {

@@ -1,0 +1,161 @@
+id: svnode-dust-policy
+name: A zero-satoshi bare OP_RETURN output is dust to a standard-policy SV node, and fine everywhere else
+description: >
+  Pins down where the BSV fleet disagrees about "dust". Two transactions are built that differ by
+  exactly ONE byte — a zero-satoshi data output whose script is either a bare "OP_RETURN <data>"
+  or the provably unspendable "OP_FALSE OP_RETURN <data>" — and each is offered to a teranode, to
+  an SV node at SV Node's permissive post-Genesis default, and to the SV node cmd/gen configures
+  with acceptnonstdoutputs=0.
+
+  After Genesis a bare OP_RETURN output is SPENDABLE, so a zero-satoshi one is dust; the
+  OP_FALSE OP_RETURN form is provably unspendable and exempt from the dust rule at any value.
+  A standard-policy SV node therefore rejects the first with "64: dust" and accepts the second,
+  while teranode accepts both — which means a transaction that teranode and arcade are perfectly
+  happy with will never enter that SV node's mempool, not even by relay from a peer holding it.
+
+  This is a characterisation test: it asserts the divergence rather than calling it a bug. If a
+  future SV Node release drops the dust rule, or teranode starts enforcing it, this scenario
+  fails and the difference is worth re-reading.
+
+  Note: -dustrelayfee and -dustlimitfactor are rejected by SV Node 1.2.2 as removed options, so
+  acceptnonstdoutputs is the only remaining lever over the dust rule.
+
+  Funding comes from coinbases that are ALREADY past the 100-block maturity, not from freshly
+  mined ones: teranode activates Chronicle at height 200 and SV Node has no counterpart, so a
+  scenario that mined its own 100-deep funding would push the fleet across that boundary. The
+  run therefore needs a chain at height >= 110; mine up to it, or `make reset` and let the
+  auto-miner run, before starting. The two blocks mined below keep the funding heights moving
+  so consecutive runs never rebuild the same transaction.
+requires: [regtest]
+roles:
+  A: teranode1   # miner, and the teranode that should accept both forms
+  SV: svnode1    # SV Node at its permissive post-Genesis default (acceptnonstdoutputs=1)
+  STRICT: svnode2 # the SV node cmd/gen gives acceptnonstdoutputs=0
+params:
+  # "OP_RETURN <'dust test'>" — spendable after Genesis, so zero satoshis makes it dust.
+  bareScript: "6a09647573742074657374"
+  # "OP_FALSE OP_RETURN <'dust test'>" — provably unspendable, exempt at any value.
+  safeScript: "006a09647573742074657374"
+steps:
+  - name: stop the auto-miner — a block mid-run would confirm the txs and empty the mempools
+    action: automine
+    with: { enabled: false }
+
+  - name: advance the tip two blocks, so each run funds itself from different coinbases
+    action: mine
+    with: { node: A, blocks: 2 }
+    assert:
+      - check: same_tip
+        with: { nodes: [A, SV, STRICT] }
+        timeout: 180s
+        message: the whole fleet followed, so both SV nodes share the funding history
+
+  - name: record the tip the funding heights are measured back from
+    action: set
+    with: { baseH: "${tip(A)}" }
+    as: base
+
+  - name: take the first funding coinbase — 101 deep, so comfortably past maturity
+    action: coinbase
+    with: { node: A, height: "${baseH - 101}" }
+    as: fund1
+
+  - name: take the second funding coinbase
+    action: coinbase
+    with: { node: A, height: "${baseH - 100}" }
+    as: fund2
+
+  - name: build the bare OP_RETURN transaction — zero satoshis on a SPENDABLE output
+    action: spend
+    with:
+      node: A
+      txid: "${fund1.txid}"
+      vout: 0
+      key: miner
+      fee: 500
+      outs:
+        - { script: "${bareScript}", satoshis: 0 }
+    as: bare
+
+  - name: build the OP_FALSE OP_RETURN control — zero satoshis, provably unspendable
+    action: spend
+    with:
+      node: A
+      txid: "${fund2.txid}"
+      vout: 0
+      key: miner
+      fee: 500
+      outs:
+        - { script: "${safeScript}", satoshis: 0 }
+    as: safe
+
+  - name: the standard-policy SV node rejects the bare form as dust
+    action: submit
+    with: { target: STRICT, hex: "${bare.hex}", efHex: "${bare.efHex}" }
+    as: strictBare
+    assert:
+      - check: expr
+        with: { left: "${strictBare.accepted}", right: "false" }
+        message: >
+          a zero-satoshi bare OP_RETURN output is a spendable output below the dust threshold,
+          so an SV node enforcing standard-output policy must refuse it
+      - check: expr
+        with: { left: "${strictBare.body}", op: contains, right: "dust" }
+        message: and the rejection names dust rather than some unrelated policy
+
+  - name: the same SV node accepts the OP_FALSE OP_RETURN control
+    action: submit
+    with: { target: STRICT, hex: "${safe.hex}", efHex: "${safe.efHex}" }
+    as: strictSafe
+    assert:
+      - check: expr
+        with: { left: "${strictSafe.accepted}", right: "true" }
+        message: >
+          provably unspendable outputs are exempt from the dust rule at any value, so the one-byte
+          OP_FALSE prefix is the whole difference
+
+  - name: the permissive SV node accepts the bare form — this is policy, not consensus
+    action: submit
+    with: { target: SV, hex: "${bare.hex}", efHex: "${bare.efHex}" }
+    as: svBare
+    assert:
+      - check: expr
+        with: { left: "${svBare.accepted}", right: "true" }
+        message: SV Node's post-Genesis default (acceptnonstdoutputs=1) takes the same transaction
+
+  - name: teranode accepts the bare form too
+    action: submit
+    with: { target: A, hex: "${bare.hex}", efHex: "${bare.efHex}" }
+    as: tnBare
+    assert:
+      - check: expr
+        with: { left: "${tnBare.accepted}", right: "true" }
+        message: teranode does not implement the dust rule
+
+  - name: so the bare transaction propagates everywhere except the standard-policy node
+    action: note
+    with: { message: "bare=${bare.txid} safe=${safe.txid}" }
+    assert:
+      # Establish that relay actually happened before asserting the absence, so a passing
+      # mempool_lacks cannot be an artefact of checking too early.
+      - check: mempool_has
+        with: { node: A, txid: "${bare.txid}" }
+        timeout: 90s
+      - check: mempool_has
+        with: { node: SV, txid: "${bare.txid}" }
+        timeout: 90s
+        message: the permissive SV node holds it, so it did cross the legacy p2p boundary
+      - check: mempool_has
+        with: { node: STRICT, txid: "${safe.txid}" }
+        timeout: 90s
+        message: the standard-policy node holds the control, so it is reachable and relaying
+      - check: mempool_lacks
+        with: { node: STRICT, txid: "${bare.txid}" }
+        timeout: 30s
+        message: >
+          but it never takes the bare form, not even by relay from the peers that hold it — a
+          transaction teranode and arcade consider perfectly valid is simply absent here
+
+  - name: restore the auto-miner
+    action: automine
+    with: { enabled: true }

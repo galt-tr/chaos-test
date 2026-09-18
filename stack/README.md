@@ -236,6 +236,26 @@ Genesis-rules activation height, set to 100 in the conf to match teranode; teran
 Chronicle activation at height 200 has no SV counterpart, so keep experiments below height
 200 between resets. Mining stays on the teranodes; SV nodes are followers.
 
+### One SV node enforces standard-output policy
+
+The **last** SV node (`svnode2` in the default fleet) is generated with
+`acceptnonstdoutputs=0`; every other node keeps SV Node's permissive post-Genesis default. With
+only one SV node (`-sv 1`) nothing is made strict, so a permissive node always remains for
+comparison.
+
+This exists because the fleet genuinely disagrees about dust. After Genesis a bare
+`OP_RETURN <data>` output is **spendable**, so a zero-satoshi one is dust and the strict node
+refuses it with `64: dust`; the provably unspendable `OP_FALSE OP_RETURN <data>` form is exempt
+at any value. Teranode implements no dust rule and takes both, and arcade relays both happily
+(`RECEIVED` → `ACCEPTED_BY_NETWORK` → `MINED`) — so a transaction the rest of the fleet mines
+never enters the strict node's mempool, not even by relay from a peer holding it.
+
+`scenarios/svnode-dust-policy.yaml` pins that down as a characterisation test. Note that
+`-dustrelayfee` and `-dustlimitfactor` are rejected by SV Node 1.2.2 as removed options, so
+`acceptnonstdoutputs` is the only remaining lever over the dust rule. If a scenario needs a
+fleet that agrees about dust, drop the flag from `cmd/gen` rather than editing the generated
+conf, which `make gen` overwrites.
+
 ## How alerts move
 
 - Every teranode's alert service bootstraps to the hub (`alert_p2p_bootstrap_peer`) and finds

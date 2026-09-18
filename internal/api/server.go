@@ -638,17 +638,29 @@ func (s *Server) postKey(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, 200, e)
 }
 
+// OutputSpec is one explicitly specified output. The To/ToScript/Satoshis/Outputs shorthand
+// below gives every output the same value and reads Satoshis 0 as "all minus fee", so it cannot
+// express a genuine zero-satoshi output — the shape a data carrier needs, and the one that
+// distinguishes SV Node's dust policy from teranode's. wallet.Spend appends the change output
+// itself, so these are only the outputs the caller cares about.
+type OutputSpec struct {
+	Script   string `json:"script"`   // locking script hex, or
+	To       string `json:"to"`       // a key name | hex to pay P2PKH (default: the input's key)
+	Satoshis uint64 `json:"satoshis"` // taken literally, zero included
+}
+
 // SpendRequest builds a signed spend of one outpoint.
 type SpendRequest struct {
-	Node     string `json:"node"` // node to fetch the source tx from (default first)
-	TxID     string `json:"txid"`
-	Vout     uint32 `json:"vout"`
-	Key      string `json:"key"`      // key name | hex | WIF that unlocks the source
-	To       string `json:"to"`       // destination key name | hex (default: same key)
-	ToScript string `json:"toScript"` // or a locking script hex
-	Satoshis uint64 `json:"satoshis"` // 0 = all minus fee
-	Fee      uint64 `json:"fee"`
-	Outputs  int    `json:"outputs"` // split the amount over this many outputs to `To` (default 1)
+	Node     string       `json:"node"` // node to fetch the source tx from (default first)
+	TxID     string       `json:"txid"`
+	Vout     uint32       `json:"vout"`
+	Key      string       `json:"key"`      // key name | hex | WIF that unlocks the source
+	To       string       `json:"to"`       // destination key name | hex (default: same key)
+	ToScript string       `json:"toScript"` // or a locking script hex
+	Satoshis uint64       `json:"satoshis"` // 0 = all minus fee
+	Fee      uint64       `json:"fee"`
+	Outputs  int          `json:"outputs"` // split the amount over this many outputs to `To` (default 1)
+	Outs     []OutputSpec `json:"outs"`    // explicit outputs; when set, overrides To/ToScript/Satoshis/Outputs
 }
 
 // SpendResult is the built transaction.
@@ -686,28 +698,44 @@ func (s *Server) Spend(ctx context.Context, req SpendRequest) (*SpendResult, err
 	if req.Fee == 0 {
 		req.Fee = 500
 	}
-	total := req.Satoshis
-	if total == 0 {
-		if src.Outputs[req.Vout].Satoshis <= req.Fee {
-			return nil, errors.New("output too small for fee")
-		}
-		total = src.Outputs[req.Vout].Satoshis - req.Fee
-	}
-	if req.Outputs <= 0 {
-		req.Outputs = 1
-	}
-	var toKey *wallet.Key
-	if req.ToScript == "" {
-		if req.To == "" {
-			toKey = key
-		} else if toKey, err = s.d.Keys.Resolve(req.To); err != nil {
-			return nil, err
-		}
-	}
 	var outs []wallet.Output
-	each := total / uint64(req.Outputs)
-	for i := 0; i < req.Outputs; i++ {
-		outs = append(outs, wallet.Output{Key: toKey, Script: req.ToScript, Satoshis: each})
+	if len(req.Outs) > 0 {
+		for i, o := range req.Outs {
+			out := wallet.Output{Script: o.Script, Satoshis: o.Satoshis}
+			if o.Script == "" {
+				k := key
+				if o.To != "" {
+					if k, err = s.d.Keys.Resolve(o.To); err != nil {
+						return nil, fmt.Errorf("output %d: %w", i, err)
+					}
+				}
+				out.Key = k
+			}
+			outs = append(outs, out)
+		}
+	} else {
+		total := req.Satoshis
+		if total == 0 {
+			if src.Outputs[req.Vout].Satoshis <= req.Fee {
+				return nil, errors.New("output too small for fee")
+			}
+			total = src.Outputs[req.Vout].Satoshis - req.Fee
+		}
+		if req.Outputs <= 0 {
+			req.Outputs = 1
+		}
+		var toKey *wallet.Key
+		if req.ToScript == "" {
+			if req.To == "" {
+				toKey = key
+			} else if toKey, err = s.d.Keys.Resolve(req.To); err != nil {
+				return nil, err
+			}
+		}
+		each := total / uint64(req.Outputs)
+		for i := 0; i < req.Outputs; i++ {
+			outs = append(outs, wallet.Output{Key: toKey, Script: req.ToScript, Satoshis: each})
+		}
 	}
 	tx, err := wallet.Spend([]wallet.Input{{SourceTx: src, Vout: req.Vout, Key: key}}, outs, req.Fee)
 	if err != nil {

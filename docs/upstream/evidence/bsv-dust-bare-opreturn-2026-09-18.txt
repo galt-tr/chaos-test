@@ -1,0 +1,36 @@
+BSV dust / bare-OP_RETURN test — chaos-test regtest, 2026-09-18
+Fleet: 3 teranodes + 2 SV nodes (Bitcoin SV v1.2.2), Genesis active (height 121 > genesisactivationheight 100)
+
+Two transactions differing by exactly ONE byte, each a 0-satoshi data output + P2PKH change:
+  A  bare        vout0 = 0 sat, script 6a09647573742074657374     (OP_RETURN <"dust test">)
+  B  control     vout0 = 0 sat, script 006a09647573742074657374   (OP_FALSE OP_RETURN <"dust test">)
+
+ROUND 1 — stock harness config (acceptnonstdoutputs = true, the post-Genesis default)
+  A -> svnode1   accepted 200      A -> svnode2  accepted 200      A -> teranode1 accepted 200
+  B -> svnode1   accepted 200      B -> teranode1 accepted 200     A,B -> arcade  202 RECEIVED
+  Mempools: A and B present on ALL FIVE nodes (confirmed by svnode1 getrawmempool RPC).
+  Mined into block 121, which BOTH SV nodes accepted (getblock confirmations=1, 5 txs).
+  Extra controls, also accepted by svnode1: 0-sat P2PKH, 1-sat P2PKH -> no dust threshold in play.
+  Arcade final status for A and B: MINED @ 121.
+
+ROUND 2 — svnode2 only, acceptnonstdoutputs=0 (svnode1 left stock as the in-fleet control)
+  A -> svnode1 (stock)  accepted 200
+  A -> svnode2 (strict) REJECTED 400  "rpc error -26: 64: dust"      <-- the reported behaviour
+  A -> teranode1        accepted 200
+  B -> svnode1 accepted 200 | B -> svnode2 accepted 200 | B -> teranode1 accepted 200
+  Propagation, after p2p relay settled:
+    teranode1/2/3  bare=yes  safe=yes
+    svnode1        bare=yes  safe=yes
+    svnode2        bare=NO   safe=yes     <-- never enters its mempool, not even via relay
+
+CONCLUSION
+  The report is correct, but it is conditional on SV node policy configuration, not on version:
+    * acceptnonstdoutputs=true  (post-Genesis DEFAULT)  -> bare OP_RETURN 0-sat is ACCEPTED
+    * acceptnonstdoutputs=0                              -> REJECTED with "64: dust"
+  Teranode accepts it under both. Arcade accepts it and reports it normally (RECEIVED ->
+  ACCEPTED_BY_NETWORK -> MINED), so the teranode/arcade half of the report reproduces exactly.
+  The distinction is provable unspendability: OP_FALSE OP_RETURN is provably unspendable and
+  exempt from the dust check; a bare OP_RETURN output is spendable post-Genesis, so a 0-sat one
+  is dust whenever the check is enforced.
+  Note: -dustrelayfee and -dustlimitfactor are rejected by v1.2.2 as "removed" config options,
+  so the threshold is no longer tunable -- but the dust RULE is still there, gated as above.

@@ -451,7 +451,15 @@ blockmaxsize=4GB
 genesisactivationheight=100
 minminingtxfee=0.00000001
 banscore=1000000
-# outbound-only peering: SV Node downloads blocks only from peers it dialed
+{{ if .StrictPolicy }}# Standard-output policy, ON for this node only; every other SV node keeps SV Node's
+# post-Genesis default of 1. After Genesis a bare "OP_RETURN <data>" output is SPENDABLE, so a
+# zero-satoshi one is dust and is rejected here with "64: dust". The provably unspendable
+# "OP_FALSE OP_RETURN <data>" form is exempt and is accepted. Teranode and arcade accept both
+# forms regardless, and scenarios/svnode-dust-policy.yaml pins that divergence down.
+# Note: -dustrelayfee and -dustlimitfactor are rejected by SV Node 1.2.2 as removed options,
+# so this flag is the only lever left over the dust rule.
+acceptnonstdoutputs=0
+{{ end }}# outbound-only peering: SV Node downloads blocks only from peers it dialed
 {{ range .LegacyPeers }}connect={{ . }}
 {{ end }}`
 
