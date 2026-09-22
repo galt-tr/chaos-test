@@ -11,3 +11,4 @@ stack/spike/.env
 stack/.env
 sim/.data/
 stack/spike/*-data/
+sim/walletd/walletd
