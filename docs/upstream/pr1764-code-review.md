@@ -5,7 +5,7 @@ The chaos-test runs quoted below were made on the previous head `2d78850`; the t
 since (`8ef96406`, `889a25c3`) touch the same-block parent check, the Aerospike freeze-record
 reader, the legacy-sync consensus bypass and the `freeze` RPC argument semantics. Where a
 finding is affected by that delta it says so. The harness ran the SQL backend
-(`utxostore=sqlite:///utxostore`, `stack/config/teranode/common.env:6`); the Aerospike/Lua
+(`utxostore=sqlite:///utxostore`, `bsv-regtest/config/teranode/common.env:6`); the Aerospike/Lua
 path is covered only by the PR's CI, not by anything below.
 
 Line numbers refer to the PR head for changed files and to the current tree for unchanged
@@ -57,7 +57,7 @@ The code explains every step:
    announcing or catch-up peer's id (`services/blockvalidation/BlockValidation.go:2033,
    2351` pass `opts.PeerID`; `catchup.go:1725-1731` sets it to the catch-up primary). In the
    harness A=`12D3KooWBTHB…`, B=`12D3KooWGkXu…`, C=`12D3KooWECRd…`
-   (`stack/config/teranode/teranode{1,2,3}.env`). On A, `blockBelow` carries B's id and
+   (`bsv-regtest/config/teranode/teranode{1,2,3}.env`). On A, `blockBelow` carries B's id and
    `forkBase` carries C's; `"…ECRd" < "…GkXu"`, so `forkBase` becomes best the moment it is
    stored. This is deterministic and predicts the inverse: had the fork come from a peer
    sorting after B, A would have stayed on `blockBelow` and the residual would not have

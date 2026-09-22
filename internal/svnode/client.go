@@ -9,8 +9,8 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/bsv-blockchain/chaos-test/internal/alerts"
-	"github.com/bsv-blockchain/chaos-test/internal/teranode"
+	"github.com/bsv-blockchain/bsv-regtest/alerts"
+	"github.com/bsv-blockchain/bsv-regtest/teranode"
 )
 
 // Client wraps the generic Bitcoin-style RPC client (same wire format as teranode's).

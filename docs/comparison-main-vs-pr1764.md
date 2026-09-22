@@ -34,7 +34,7 @@ Reproduce:
 
 ```bash
 make reset && curl -s -X POST -d '{"mode":"auto"}' localhost:8600/api/scenarios/freeze-skew-rpc/run
-echo TERANODE_IMAGE_1=ghcr.io/bsv-blockchain/teranode:latest > stack/.env
+echo TERANODE_IMAGE_1=ghcr.io/bsv-blockchain/teranode:latest > bsv-regtest/.env
 make reset && curl -s -X POST -d '{"mode":"auto"}' localhost:8600/api/scenarios/freeze-skew-rpc/run
-rm stack/.env && make reset
+rm bsv-regtest/.env && make reset
 ```

@@ -5,14 +5,14 @@ import (
 	"testing"
 	"time"
 
-	"github.com/bsv-blockchain/chaos-test/internal/teranode"
+	"github.com/bsv-blockchain/bsv-regtest/teranode"
 )
 
 // allOK builds a Diagnostics whose every source succeeded, as the healthy baseline each
 // test then perturbs.
 func allOK(node string, height uint32, tip string) *Diagnostics {
 	d := &Diagnostics{
-		Node: node, Container: "chaos-" + node, ContainerState: "running",
+		Node: node, Container: "bsv-regtest-" + node, ContainerState: "running",
 		Tip:     &TipInfo{Height: height, Hash: tip},
 		FSM:     &teranode.FSMInfo{State: "RUNNING", StateValue: 1},
 		Catchup: &teranode.CatchupStatus{},

@@ -11,7 +11,7 @@ description: >
   of an invalid parent, no re-fetch. Expected on upstream main (findings): no verdict at all
   (SERVICE_ERROR only) and, once B builds on the block, a catch-up loop that re-fetches and
   re-validates it every few seconds. Run with TERANODE_IMAGE_1=ghcr.io/bsv-blockchain/teranode:latest
-  in stack/.env (plus `make reset`) for the baseline; that image has no alert service in the
+  in bsv-regtest/.env (plus `make reset`) for the baseline; that image has no alert service in the
   private stack, which is why this scenario uses the RPC. The height-anchored behaviour itself
   (fleet agreement below the window, clean rejection inside it) is freeze-timing-skew.
 requires: [regtest]

@@ -1,0 +1,6 @@
+/upstream/
+/.data/
+/.env
+*.db
+*.sqlite
+/walletd/walletd

@@ -12,7 +12,10 @@ RUN mkdir -p /internal/api/uidist && sed -i "s#'../../internal/api/uidist'#'/int
 
 FROM docker.io/library/golang:1.26-alpine AS builder
 WORKDIR /src
-COPY go.mod go.sum ./
+# Workspace build: the orchestrator imports github.com/bsv-blockchain/bsv-regtest through go.work
+# (and go.mod's replace => ./bsv-regtest), so both modules' files must exist before downloading.
+COPY go.work go.work.sum* go.mod go.sum ./
+COPY bsv-regtest/go.mod bsv-regtest/go.sum ./bsv-regtest/
 RUN go mod download
 COPY . .
 COPY --from=ui /internal/api/uidist ./internal/api/uidist

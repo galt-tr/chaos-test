@@ -6,7 +6,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/bsv-blockchain/chaos-test/internal/teranode"
+	"github.com/bsv-blockchain/bsv-regtest/teranode"
 )
 
 // Input is everything Evaluate is allowed to look at. Keeping it a plain struct makes the

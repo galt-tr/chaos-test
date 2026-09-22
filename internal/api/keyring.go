@@ -9,7 +9,7 @@ import (
 	"sort"
 	"sync"
 
-	"github.com/bsv-blockchain/chaos-test/internal/wallet"
+	"github.com/bsv-blockchain/bsv-regtest/wallet"
 )
 
 // KeyEntry is a named key the harness controls (victim coins, change, …).

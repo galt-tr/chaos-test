@@ -1,126 +1,55 @@
-# chaos-test: BSV alert-system scenario harness
-N              ?= 3
-SV             ?= 2
-SVNODE_IMAGE   ?= docker.io/bitcoinsv/bitcoin-sv:1.2.2
+# chaos-test: the harness that drives bsv-regtest (the network lives in ./bsv-regtest and has
+# its own Makefile; the stack targets below delegate to it with chaos-test's defaults).
+STACK          := bsv-regtest
+# chaos-test builds the teranode PR under test; bsv-regtest on its own defaults to main.
 TERANODE_REF   ?= fix/1422-height-anchored-freeze
 TERANODE_TAG   ?= pr1764
-TERANODE_REPO  ?= https://github.com/bsv-blockchain/teranode
-ALERT_SYSTEM_REF  ?= v0.1.17
-ALERT_SYSTEM_REPO ?= https://github.com/bsv-blockchain/go-alert-system
-STACK          := stack
-COMPOSE        := podman compose -f $(STACK)/compose.yaml
-# compose profiles started by `make up`; e.g. make up PROFILES="--profile tools"
-PROFILES       ?= --profile tools --profile arcade --profile merkle --profile wallet
+# patches the PR branch needs on top of bsv-regtest's own (0001 is already in teranode main)
+EXTRA_PATCHES  ?= $(CURDIR)/patches/teranode
+# the harness keeps the network egress-free (verified on podman); bsv-regtest alone defaults to open
+INTERNAL       ?= 1
+STACK_VARS      = TERANODE_REF=$(TERANODE_REF) TERANODE_TAG=$(TERANODE_TAG) INTERNAL=$(INTERNAL) EXTRA_PATCHES=$(EXTRA_PATCHES)
+RUNTIME        ?= $(shell command -v podman >/dev/null 2>&1 && echo podman || echo docker)
+COMPOSE        ?= $(RUNTIME) compose
+STACK_TARGETS  := gen build build-tools build-teranode build-alert-system build-walletd up down clean wait status logs tools test-walletd
 
-.PHONY: gen build build-tools build-teranode build-alert-system walletd-build up down wait status logs tools test test-walletd tidy
+.PHONY: $(STACK_TARGETS) test walletd-build
+$(STACK_TARGETS):
+	$(MAKE) -C $(STACK) $(STACK_VARS) $@
 
-gen: ## regenerate stack/compose.yaml + config for N teranodes and SV SV nodes (keys are kept)
-	go run ./cmd/gen -n $(N) -sv $(SV) -out $(STACK) -teranode-image localhost/teranode-chaos:$(TERANODE_TAG) -svnode-image $(SVNODE_IMAGE)
+# bsv-regtest's committed compose.yaml is rendered with its own defaults (teranode main, open
+# networks); the harness re-renders with its settings before every `up` so they never drift.
+up: gen
 
-build: build-tools build-alert-system build-teranode walletd-build ## build all images
+walletd-build: build-walletd ## kept for muscle memory
 
-build-tools: ## alertctl + stackctl image
-	podman build -t localhost/chaos-test:local .
+test: ## both modules (go.work); walletd is a separate module, see test-walletd
+	CGO_ENABLED=0 go test ./...
 
-build-teranode: ## clone TERANODE_REF, apply the alert-p2p settings patch, build the image
-	@if [ ! -d $(STACK)/vendor/teranode/.git ]; then \
-	  git clone --depth 1 --branch $(TERANODE_REF) $(TERANODE_REPO) $(STACK)/vendor/teranode; fi
-	cd $(STACK)/vendor/teranode && git diff --quiet || (echo "vendor/teranode has local changes (patch already applied?) - continuing"; true)
-	cd $(STACK)/vendor/teranode && for p in ../../patches/teranode/*.patch; do \
-	  if git apply --3way --check $$p 2>/dev/null; then git apply --3way $$p && echo "applied $$(basename $$p)"; \
-	  elif git apply --reverse --check $$p 2>/dev/null; then echo "already applied $$(basename $$p)"; \
-	  else echo "PATCH $$(basename $$p) DOES NOT APPLY to $(TERANODE_REF) - fix stack/patches first"; exit 1; fi; done
-	cd $(STACK)/vendor/teranode && podman build -t localhost/teranode-chaos:$(TERANODE_TAG) \
-	  --build-arg BASE_IMG=ghcr.io/bsv-blockchain/teranode-base:build-latest \
-	  --build-arg RUN_IMG=ghcr.io/bsv-blockchain/teranode-base:run-latest \
-	  --build-arg GIT_SHA=$$(git rev-parse HEAD) --build-arg GIT_COMMIT=$$(git rev-parse --short HEAD) \
-	  --build-arg GIT_VERSION=$(TERANODE_TAG)-chaos --build-arg BUILD_JOBS=10 .
-
-build-alert-system: ## go-alert-system hub image (our Dockerfile, fully-qualified base images)
-	@if [ ! -d $(STACK)/vendor/go-alert-system/.git ]; then \
-	  git clone --depth 1 --branch $(ALERT_SYSTEM_REF) $(ALERT_SYSTEM_REPO) $(STACK)/vendor/go-alert-system; fi
-	podman build -t localhost/go-alert-system:$(ALERT_SYSTEM_REF) -f $(STACK)/docker/go-alert-system.Dockerfile $(STACK)/vendor/go-alert-system
-
-up: ## start the stack (teranodes, SV nodes + sidecars, kafka, alert hub) + profiles
-	mkdir -p $(STACK)/.data/tools $(STACK)/.data/alert-system $(STACK)/.data/arcade $(STACK)/.data/merkle-service $(STACK)/.data/wallet-db
-	@# the hub image runs as USER 65534; compose asks for :U on .data/alert-system but
-	@# docker-compose (podman's preferred provider when installed) drops it, leaving the
-	@# dir owned by root inside the userns. Do the remap ourselves, provider-independent.
-	@podman unshare chown -R 65534:65534 $(STACK)/.data/alert-system
-	@# same remap for every sidecar's data dir: the hub image runs as USER 65534 and the
-	@# :U on .data/alert-svnodeJ is dropped by docker-compose, so the sidecar cannot create
-	@# its SQLite db ("unable to open database file") and exits.
-	@for j in $$(seq 1 $(SV)); do mkdir -p $(STACK)/.data/svnode$$j $(STACK)/.data/alert-svnode$$j; \
-	  podman unshare chown -R 65534:65534 $(STACK)/.data/alert-svnode$$j; done
-	cd $(STACK) && podman compose $(PROFILES) up -d
-
-down: ## stop and remove the stack (keeps .data/)
-	cd $(STACK) && podman compose $(PROFILES) down
-
-clean: down ## also wipe chain/alert state
-	podman unshare rm -rf $(STACK)/.data
-
-wait: ## wait until every node answers (teranode health port, SV node RPC, then sidecar health best-effort)
-	@# Bounded, and loud on failure: a container that exits at startup used to leave these
-	@# loops spinning forever with no output, which looks identical to a slow boot.
-	@for n in $$(seq 1 $(N)); do port=$$((20000 + (n-1)*2000)); i=0; \
-	  until curl -sf --max-time 2 http://localhost:$$port/health >/dev/null 2>&1; do \
-	    i=$$((i+1)); if [ $$i -ge 150 ]; then echo "teranode$$n did not become healthy in 5m:"; \
-	      podman ps -a --filter name=chaos-teranode$$n --format '  {{.Names}}  {{.Status}}'; \
-	      echo "  last logs:"; podman logs --tail 5 chaos-teranode$$n 2>&1 | sed 's/^/    /'; exit 1; fi; \
-	    sleep 2; done; echo "teranode$$n healthy"; done
-	@for j in $$(seq 1 $(SV)); do port=$$((40000 + (j-1)*1000 + 332)); i=0; \
-	  until curl -sf --max-time 2 -u bitcoin:bitcoin -H 'content-type: application/json' -d '{"jsonrpc":"1.0","id":"w","method":"getblockcount","params":[]}' http://localhost:$$port >/dev/null 2>&1; do \
-	    i=$$((i+1)); if [ $$i -ge 150 ]; then echo "svnode$$j did not answer RPC in 5m:"; \
-	      podman ps -a --filter name=chaos-svnode$$j --format '  {{.Names}}  {{.Status}}'; \
-	      echo "  last logs:"; podman logs --tail 5 chaos-svnode$$j 2>&1 | sed 's/^/    /'; exit 1; fi; \
-	    sleep 2; done; echo "svnode$$j healthy"; done
-	@for j in $$(seq 1 $(SV)); do port=$$((40000 + (j-1)*1000 + 300)); i=0; \
-	  until curl -sf --max-time 2 http://localhost:$$port/health >/dev/null 2>&1 || [ $$i -ge 45 ]; do sleep 2; i=$$((i+1)); done; \
-	  if [ $$i -ge 45 ]; then echo "alert-svnode$$j: API not up yet (it starts after 2 alert peers connect)"; else echo "alert-svnode$$j up"; fi; done
-
-status: ## tips and alert sequence
-	$(STACK)/scripts/tips.sh
-
-logs: ## follow all logs
-	cd $(STACK) && podman compose logs -f
-
-tools: ## shell in the tools container
-	podman exec -it chaos-tools bash
-
-walletd-build: ## walletd image (the go-wallet-toolbox wallet sidecar; its own Go module)
-	podman build -t localhost/chaos-walletd:local -f sim/walletd/Dockerfile sim/walletd
-
-test:
-	CGO_ENABLED=0 go test ./cmd/... ./internal/...
-
-test-walletd: ## walletd is a nested module, so the main `go test ./...` does not reach it
-	cd sim/walletd && CGO_ENABLED=0 go test ./...
-
-tidy:
-	go mod tidy
+tidy: ## each module with GOWORK=off, so their go.sum files stay complete for standalone builds
+	GOWORK=off go mod tidy && $(MAKE) -C $(STACK) tidy
 
 # ---- simulator layer ----------------------------------------------------------------------
-.PHONY: ui sim-build sim-up sim-down sim-logs
+.PHONY: ui sim-build sim-up sim-down sim-logs reset
 ui: ## build the React UI into internal/api/uidist (embedded by the orchestrator)
 	cd sim/ui && npm install --no-audit --no-fund && npm run build
 
 sim-build: ## orchestrator image (UI=0 for API-only)
-	podman build -t localhost/chaos-orchestrator:local --build-arg UI=$${UI:-1} -f sim/Dockerfile .
+	$(RUNTIME) build -t localhost/chaos-orchestrator:local --build-arg UI=$${UI:-1} -f sim/Dockerfile .
 
-sim-up: ## start the orchestrator against the running stack (needs the podman socket)
-	mkdir -p sim/.data && cd sim && podman compose up -d --force-recreate
+sim-up: ## start the orchestrator against the running network (needs the container runtime socket)
+	mkdir -p sim/.data && cd sim && $(COMPOSE) up -d --force-recreate
 
 sim-down:
-	cd sim && podman compose down
+	cd sim && $(COMPOSE) down
 
 sim-logs:
-	podman logs -f chaos-orchestrator
+	$(RUNTIME) logs -f chaos-orchestrator
 
-reset: ## wipe chain + alert state everywhere (stack data, hub, tools log, simulator alert log/runs) and restart
-	cd $(STACK) && podman compose $(PROFILES) down
-	-cd sim && podman compose down
-	podman unshare rm -rf $(STACK)/.data
+reset: ## wipe chain + alert state everywhere (network data, hub, tools log, simulator alert log/runs) and restart
+	$(MAKE) -C $(STACK) $(STACK_VARS) down
+	-cd sim && $(COMPOSE) down
+	$(MAKE) -C $(STACK) $(STACK_VARS) clean
 	rm -rf sim/.data/alerts.json sim/.data/alerts.json.tmp
 	$(MAKE) up wait
 	$(MAKE) sim-up

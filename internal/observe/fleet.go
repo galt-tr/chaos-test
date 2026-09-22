@@ -10,11 +10,11 @@ import (
 	"sync"
 	"time"
 
-	"github.com/bsv-blockchain/chaos-test/internal/alerts"
+	"github.com/bsv-blockchain/bsv-regtest/alerts"
+	"github.com/bsv-blockchain/bsv-regtest/teranode"
+	"github.com/bsv-blockchain/bsv-regtest/topology"
 	"github.com/bsv-blockchain/chaos-test/internal/arcade"
 	"github.com/bsv-blockchain/chaos-test/internal/svnode"
-	"github.com/bsv-blockchain/chaos-test/internal/teranode"
-	"github.com/bsv-blockchain/chaos-test/internal/topology"
 )
 
 // NodeState is the harness's current view of one teranode.

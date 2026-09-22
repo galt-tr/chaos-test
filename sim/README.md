@@ -1,12 +1,12 @@
 # chaos-test simulator
 
-The orchestrator attaches to a running stack (`../stack`) and drives it: it observes every
+The orchestrator attaches to a running stack (`../bsv-regtest`) and drives it: it observes every
 node, delivers alerts, injects chaos and runs scenarios. The React UI is embedded in the same
 binary.
 
 ```bash
 make sim-build     # image localhost/chaos-orchestrator:local (UI=0 skips the UI build)
-make sim-up        # joins chaos_chaosnet/alertnet/ctlnet; API + UI on http://localhost:8600
+make sim-up        # joins bsv-regtest_chaosnet/alertnet/ctlnet; API + UI on http://localhost:8600
 make sim-logs
 ```
 
@@ -64,7 +64,7 @@ Host URLs come from `inventory.json` (`services.arcade.hostURL` and `urls.*`); r
 Alerts are sequenced; every node accepts only `latest+1`. The orchestrator's log
 (`sim/.data/alerts.json`) must hold the network's full history. `make reset` wipes chain,
 hub and logs together; if you publish alerts with `alertctl` from the tools container
-instead, copy its `stack/.data/tools/alerts.json` over before starting the orchestrator.
+instead, copy its `bsv-regtest/.data/tools/alerts.json` over before starting the orchestrator.
 
 ## API cheat sheet
 

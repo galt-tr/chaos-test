@@ -2,14 +2,15 @@ module github.com/bsv-blockchain/chaos-test
 
 go 1.26.0
 
+require github.com/bsv-blockchain/go-sdk v1.5.2
+
 require (
-	github.com/bsv-blockchain/go-alert-system v0.1.17
-	github.com/bsv-blockchain/go-sdk v1.5.2
-	github.com/libp2p/go-libp2p v0.49.0
-	github.com/mrz1836/go-datastore v1.3.7
-	github.com/multiformats/go-multiaddr v0.16.1
-	github.com/twmb/franz-go v1.21.7
-	google.golang.org/protobuf v1.36.12
+	github.com/bsv-blockchain/go-alert-system v0.1.17 // indirect
+	github.com/libp2p/go-libp2p v0.49.0 // indirect
+	github.com/mrz1836/go-datastore v1.3.7 // indirect
+	github.com/multiformats/go-multiaddr v0.16.1 // indirect
+	github.com/twmb/franz-go v1.21.7 // indirect
+	google.golang.org/protobuf v1.36.12 // indirect
 )
 
 require (
@@ -23,6 +24,7 @@ require (
 	github.com/bitcoinsv/bsvd v0.0.0-20190609155523-4c29707f7173 // indirect
 	github.com/bitcoinsv/bsvlog v0.0.0-20181216181007-cb81b076bf2e // indirect
 	github.com/bitcoinsv/bsvutil v0.0.0-20181216182056-1d77cf353ea9 // indirect
+	github.com/bsv-blockchain/bsv-regtest v0.0.0
 	github.com/bsv-blockchain/go-bc v1.2.0 // indirect
 	github.com/bsv-blockchain/go-bn v1.2.0 // indirect
 	github.com/bsv-blockchain/go-bt/v2 v2.7.1 // indirect
@@ -164,12 +166,12 @@ require (
 	golang.org/x/sys v0.48.0 // indirect
 	golang.org/x/telemetry v0.0.0-20260909141559-55ac43c52cc3 // indirect
 	golang.org/x/text v0.42.0 // indirect
-	golang.org/x/time v0.16.0 // indirect
+	golang.org/x/time v0.16.0
 	golang.org/x/tools v0.50.0 // indirect
 	gonum.org/v1/gonum v0.17.0 // indirect
 	google.golang.org/genproto/googleapis/rpc v0.0.0-20260908043556-f8649ddbbfe6 // indirect
 	google.golang.org/grpc v1.83.2 // indirect
-	gopkg.in/yaml.v3 v3.0.1 // indirect
+	gopkg.in/yaml.v3 v3.0.1
 	gorm.io/driver/mysql v1.6.0 // indirect
 	gorm.io/driver/postgres v1.6.2 // indirect
 	gorm.io/driver/sqlite v1.6.0 // indirect
@@ -183,3 +185,5 @@ require (
 )
 
 replace gorm.io/driver/sqlite => github.com/glebarez/sqlite v1.11.0
+
+replace github.com/bsv-blockchain/bsv-regtest => ./bsv-regtest

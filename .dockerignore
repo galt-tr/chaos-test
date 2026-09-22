@@ -1,0 +1,7 @@
+.git/
+bsv-regtest/upstream/
+bsv-regtest/.data/
+bsv-regtest/walletd/
+sim/.data/
+sim/ui/node_modules/
+sim/ui/dist/
