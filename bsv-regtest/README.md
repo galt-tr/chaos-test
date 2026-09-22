@@ -1,330 +1,401 @@
-# chaos-test stack: a standalone private BSV regtest network
+# bsv-regtest
 
-This directory is a complete, self-contained regtest network for alert-system testing:
+A private BSV regtest network in containers: **teranode**, **Bitcoin SV Node**, **arcade**
+(transaction broadcaster), **merkle-service**, a **BRC-100 wallet** (go-wallet-toolbox storage
+server plus a small HTTP wallet) and the **alert system**, on Docker or Podman. Clone, build,
+mine, broadcast.
 
-- **N teranodes** (default 3), built from a teranode ref plus three small patches (alert-P2P
-  settings, upstream PR bsv-blockchain/teranode#1767; two legacy-service fixes, see
-  `patches/teranode/`), meshed over a private network;
-- **SV Bitcoin SV Node instances** (default 2) that follow the teranodes' chain over teranode's
-  legacy (Bitcoin wire) service, each with its own **go-alert-system sidecar** that applies
-  alerts to it over RPC - the reference implementation to compare teranode against;
-- **Redpanda** (Kafka) shared by the nodes;
-- a **go-alert-system** node acting as the hub of a private alert network;
-- optionally **arcade** (transaction processor with embedded chaintracks), **merkle-service**,
-  and a **go-wallet-toolbox** wallet server on Postgres;
-- a **tools** container with `alertctl` (build, sign, deliver alerts) and `stackctl` (mine,
+What you get by default:
+
+- 3 teranodes built from source (plus two small patches, see [`docs/patches.md`](docs/patches.md)),
+  meshed over a private network;
+- 2 SV Nodes that follow the teranodes' chain over teranode's legacy (Bitcoin wire) service, each
+  with a **go-alert-system sidecar** that applies alerts to it over RPC;
+- Redpanda (Kafka) for the teranodes; a go-alert-system **alert hub** bootstrapping a private alert
+  network;
+- **arcade** with its embedded chaintracks, **merkle-service**, **wallet-infra** (go-wallet-toolbox
+  storage server on Postgres) and **walletd** (an HTTP wallet holding the dev wallet identity);
+- a **tools** container with `alertctl` (build, sign and deliver alerts) and `stackctl` (mine,
   spend, submit).
 
-Nothing here needs the internet at run time, and nothing here depends on the simulator/GUI in
-`../sim`. You can use this network on its own with the scripts and CLIs described below; the
-simulator is an optional layer that attaches to it later.
+Everything is pinned (keys, IPs, images) and rendered from one generator; after `make build`
+nothing needs the internet. The network is also the layer under the
+[chaos-test](https://github.com/galt-tr/chaos-test) harness, which drives it with scenarios.
+
+License: Apache-2.0. **The keys in this repository are development keys; read
+[Security](#security-development-keys) before exposing anything.**
+
+## Architecture
+
+```
+ ┌──────────────────────── chaosnet 10.190.0.0/24 (peer plane) ───────────────────────────┐
+ │  teranode1 ◄── libp2p 9905 ──► teranode2 ◄──► teranode3          kafka-shared (redpanda) │
+ │      │  legacy service = Bitcoin wire :18444  (SV nodes dial in, connect= only)          │
+ │  svnode1 ◄─────────────────► svnode2                                                    │
+ │                                                                                         │
+ │  arcade ──── datahub /api/v1 ────► teranodes      merkle-service ── libp2p ──► teranodes│
+ │    ▲ ▲──── /watch registration + bearer-token callbacks ────────────┘                   │
+ │    │ POST /tx  +  /chaintracks (headers)                                                │
+ │  wallet-infra (BRC-100 storage server, postgres) ◄── BRC-103 ── walletd (HTTP wallet)   │
+ └─────────────────────────────────────────────────────────────────────────────────────────┘
+ ┌──────── alertnet 192.0.0.128/26 (alert plane) ────────┐  ┌──── ctlnet 10.191.0.0/24 ────┐
+ │  alert hub ◄── sync stream every 15 s ──► teranodes'  │  │ RPC, asset API, health,      │
+ │  alert services, alert-svnodeJ (──RPC──► svnodeJ),    │  │ sidecar APIs, tools container│
+ │  tools (alertctl push / probe)                        │  │ (all host-published ports)   │
+ └───────────────────────────────────────────────────────┘  └──────────────────────────────┘
+ host: 20090 teranode1 dashboard · 18080 arcade · 18090 merkle · 18100 wallet-infra · 18700 walletd · 3000 hub
+```
+
+Three planes: peer traffic (chaosnet), alert traffic (alertnet, a reserved range libp2p treats
+as public so go-alert-system's private-IP gater passes) and control (ctlnet, everything with a
+host port). Mining happens on teranodes; SV nodes are followers.
 
 ## Prerequisites
 
-- **podman 5.x** with `podman compose` (podman-compose 1.4+); rootless is fine. Docker with
-  `docker compose` is untested (the compose file uses only standard keys plus one
-  `x-podman` extension).
-- **Go 1.24+** on the host, only to run the config generator (`go run` fetches the toolchain
-  the module asks for). Node.js is **not** needed for the stack.
-- **RAM**: about 8 GB free for 3 nodes (each node is capped at 3 GB by `TERANODE_MEM_LIMIT`),
-  plus ~1 GB for Redpanda, arcade, merkle-service and the wallet.
-- **Disk**: the teranode build image is large (several GB during the build); `.data/` grows
-  slowly on regtest.
-- **Network access at build time only** (ghcr.io, docker.io, github.com) to pull base images
-  and clone teranode / go-alert-system. After `make build` the stack runs offline.
-- SELinux enforcing is fine (bind mounts use `:Z`). The podman API socket is *not* required
-  for the stack (only the simulator's partition/pause actions use it).
+- **Docker Engine with `docker compose` v2, or Podman 5.x with podman-compose 1.4+** (rootless is
+  fine; Docker Desktop works). `make` picks podman if installed, otherwise docker; force one with
+  `make RUNTIME=docker …`.
+- **Go 1.26+** only to regenerate the configuration (`make gen`). Not needed to build or run.
+- `curl` and `jq`; `python3` for `scripts/tips.sh` and `scripts/partition.sh`.
+- **RAM:** about 10 GB free for the default fleet (3 × 3 GB teranode caps, 2 × 2 GB SV Node,
+  ~1.5 GB for Redpanda, arcade, merkle-service and the wallet). Lower `N`/`SV` on smaller hosts.
+- **Disk:** several GB for the teranode build; `.data/` grows slowly on regtest.
+- **Time:** the first `make build` takes 10–20 minutes (teranode compiles from source); later
+  builds reuse the checkout and layer cache. `make up && make wait` takes a few minutes.
+- Network access at **build time only** (ghcr.io, docker.io, github.com).
+- SELinux enforcing is fine (bind mounts carry `:z` / `:Z` labels, a no-op elsewhere).
 
 ## Quick start
 
 ```bash
-git clone git@github.com:galt-tr/chaos-test.git && cd chaos-test
-make build          # images: tools, go-alert-system hub, patched teranode (10-20 min the first time)
-make gen N=3 SV=2   # writes stack/compose.yaml + stack/config/ (keys.json is created once and kept)
-make up             # teranodes, SV nodes + alert sidecars, kafka, hub + the tools, arcade, merkle, wallet profiles
-make wait           # blocks until every node answers (teranode health, SV node RPC, sidecar API)
-make status         # best block of every node, SV peers and sidecar alert sequences, hub sequence
+git clone https://github.com/bsv-blockchain/bsv-regtest.git && cd bsv-regtest
+make build          # tools, alert-system and walletd images + teranode from source (10-20 min, once)
+make up             # 3 teranodes, 2 SV nodes + alert sidecars, kafka, alert hub, arcade, merkle-service, wallet, tools
+make wait           # blocks until the teranodes and SV nodes answer (then checks the sidecar APIs, best effort)
+scripts/mine.sh 1 101   # regtest coinbase maturity is 100: block 1's coinbase is now spendable
+make status         # every node's tip, SV peers, alert sequences
 ```
 
-Only the network, without arcade / merkle-service / wallet:
+Smaller fleets:
 
 ```bash
-make up PROFILES=                      # teranodes, SV nodes + sidecars, kafka, alert hub
+make up PROFILES=                      # network only: teranodes, SV nodes + sidecars, kafka, alert hub
 make up PROFILES="--profile tools"     # + the tools container
-make gen SV=0 && make up PROFILES=     # teranodes only (no SV nodes, legacy service off)
+make gen SV=0 && make up               # teranodes only (no SV nodes; legacy service off)
 ```
 
-Everything is `podman compose` underneath; `cd stack && podman compose --profile tools up -d`
-does the same as `make up PROFILES="--profile tools"`.
-
-Stop / reset:
-
-```bash
-make down     # stop and remove containers, keep stack/.data (chain, alerts, wallet DB)
-make clean    # down + wipe stack/.data  (podman unshare is used because .data is owned by subuids)
-```
-
-`make gen N=5 SV=1` regenerates everything for other node counts (teranodes 2..10, SV nodes
-0..5); node identities, sidecar identities and alert genesis keys in `config/keys.json` are
-preserved, new nodes get new keys. The SV Node image (`SVNODE_IMAGE`, default
-`docker.io/bitcoinsv/bitcoin-sv:1.2.2`) is pulled, not built.
-
-## Where things are
-
-Host-published ports (`localhost`):
-
-| service | ports | notes |
-|---|---|---|
-| teranode N | base `20000 + (N-1)*2000`: health `+0`, asset API + dashboard `+90`, propagation `+833`, RPC `+1292` | node 1: http://localhost:20090 (dashboard), http://localhost:20090/api/v1 (asset), http://localhost:21292 (RPC, basic auth `bitcoin:bitcoin`) |
-| svnode J | base `40000 + (J-1)*1000`: RPC `+332`, alert sidecar API `+300` | svnode1: RPC http://localhost:40332 (`bitcoin:bitcoin`), sidecar http://localhost:40300/health |
-| alert hub | 3000 | `GET /health` (`sequence`, `active_peers`), `GET /alerts` |
-| arcade | 18080 API + landing page, 18081 health, 18082 SSE `/events`, 18083 chaintracks `/chaintracks/v2/*` | `GET /tx/{txid}`, `POST /tx` (Extended Format hex) |
-| merkle-service | 18090 | |
-| wallet-infra | 18100 | go-wallet-toolbox JSON-RPC |
-
-In-network addresses (pinned IPs, peer ids, multiaddrs, URLs) are in `config/inventory.json`,
-the contract every tool reads. Kafka is not published to the host; use
-`podman exec chaos-kafka-shared rpk …` (topics `rejectedtx-teranodeN`, `invalid-blocks-teranodeN`).
-
-## Everyday operations
-
-```bash
-stack/scripts/mine.sh 1 101                    # mine 101 blocks on node 1 (regtest coinbase maturity is 100)
-stack/scripts/mine.sh 2 1 <address>            # mine to a specific address
-stack/scripts/rpc.sh 1 getblockchaininfo       # any JSON-RPC: rpc.sh <node> <method> '[params]'
-stack/scripts/rpc.sh 1 freeze '["<txid>", 0, ""]'          # admin RPC freeze (immediate, every height)
-stack/scripts/rpc.sh 1 freeze '["<txid>", 0, "", 120, 130, false]'   # height-anchored (PR #1764 image only)
-stack/scripts/rpc.sh sv1 getblockchaininfo     # SV nodes: sv1 / svnode1 (RPC 40332, 41332, ...)
-stack/scripts/rpc.sh sv1 queryBlacklist        # what the sidecar has frozen on svnode1
-stack/scripts/rpc.sh sv1 getpeerinfo           # its outbound links to the teranodes' legacy service
-stack/scripts/tips.sh                          # every node's tip (+ SV peers and sidecar alert sequence) + hub sequence
-stack/scripts/partition.sh 2 alert on          # node 2 stops seeing the alert network (control plane untouched)
-stack/scripts/partition.sh 2 alert off         # reconnect with its pinned IP
-stack/scripts/partition.sh 3 p2p on            # node 3 loses node-to-node p2p + datahub access
-stack/scripts/partition.sh svnode1 alert on    # cuts svnode1's alert SIDECAR from alertnet
-stack/scripts/partition.sh svnode1 p2p on      # svnode1 loses its legacy links to the teranodes
-make logs                                      # follow all container logs
-podman logs -f chaos-teranode1                 # one node
-```
-
-Read RPCs are served from a cache (`getchaintips` for 300 s), so observe chain state through the
-asset API instead:
-
-```bash
-curl -s localhost:20090/api/v1/bestblockheader/json | jq '{height, hash}'
-curl -s localhost:20090/api/v1/utxos/<txid>/json | jq '.[] | {vout, status}'   # OK | FROZEN | SPENT per output
-curl -s localhost:20090/api/v1/txmeta/<txid>/json | jq '{blockHeights, frozen}'
-curl -s localhost:20090/api/v1/block/height/105/json | jq .hash
-```
-
-### Alerts and transactions from the tools container
-
-`make tools` opens a shell in `chaos-tools`, where `alertctl` and `stackctl` have the stack's
-addresses pre-set from `config/tools.env` (`$TERANODE1_ASSET`, `$TERANODE1_ALERT_ADDR`,
-`$HUB_ALERT_ADDR`, `$RPC_USER`, …). Alerts are signed with the three genesis keys in
-`config/keys.json`; the log of everything built lives in `/data/alerts.json`
-(`stack/.data/tools/alerts.json` on the host) and must stay in sequence with the network.
-
-```bash
-alertctl                                        # usage
-CB=$(stackctl coinbase --asset $TERANODE1_ASSET --height 1 | jq -r .txid)
-alertctl build freeze --fund $CB:0:120:130      # sign alert #N freezing CB:0 over heights [120, 130)
-alertctl push --peer $TERANODE1_ALERT_ADDR --seq 1   # deliver to ONE node over the alert sync stream
-alertctl probe --peer $TERANODE2_ALERT_ADDR     # which sequence does node 2 hold?
-alertctl hub                                    # hub /health + /alerts
-alertctl log                                    # what has been built so far
-stackctl newkey                                 # fresh key (WIF, hex, address, locking script)
-stackctl spend --asset $TERANODE1_ASSET --txid $CB --vout 0 --key <WIF|hex> --to <key|address>
-stackctl submit --asset $TERANODE2_ASSET --hex <rawtx>       # to ONE node (403 + UTXO_FROZEN when frozen there)
-stackctl submit --arcade $ARCADE_URL --hex <efHex>          # via arcade, which needs the Extended Format hex that `spend` prints as efHex
-```
-
-The coinbase key (`minerWIF` in `config/inventory.json` / `keys.json`) unlocks every mined
-coinbase, so a funded transaction is one `stackctl spend` away after 101 blocks.
-
-### A worked example: one node freezes, the others do not
-
-This is the shape of teranode issue #1422 done by hand (the simulator's scenarios automate it).
+Your first transaction, broadcast through arcade. `make tools` opens a shell in the tools
+container, where `stackctl` and `alertctl` default to teranode 1 and `$ARCADE_URL`,
+`$TERANODE2_ASSET`, `$SVNODE1_RPC`, … are preset from `config/tools.env`:
 
 ```bash
 make tools
-stack/scripts/mine.sh 1 101 &&                             # (on the host) fund the miner key
-K=$(stackctl newkey); KEY=$(echo "$K" | jq -r .privateKeyHex)
-CB=$(stackctl coinbase --asset $TERANODE1_ASSET --height 1 | jq -r .txid)
-P=$(stackctl spend --asset $TERANODE1_ASSET --txid $CB --vout 0 --key "$(jq -r .minerWIF /config/inventory.json)" --to $KEY)
-stackctl submit --asset $TERANODE1_ASSET --hex $(echo "$P" | jq -r .hex)
-# mine it (host): stack/scripts/mine.sh 1 1 ; then freeze P:0 on node 1 only, over a future window
-PT=$(echo "$P" | jq -r .txid)
-alertctl build freeze --fund $PT:0:110:120
-alertctl push --peer $TERANODE1_ALERT_ADDR --seq 1
-curl -s $TERANODE1_ASSET/utxos/$PT/json | jq '.[0].status'   # FROZEN on node 1
-curl -s $TERANODE2_ASSET/utxos/$PT/json | jq '.[0].status'   # OK on node 2 (until its next 15 s sync round)
-S=$(stackctl spend --asset $TERANODE2_ASSET --txid $PT --vout 0 --key $KEY)
-stackctl submit --asset $TERANODE1_ASSET --hex $(echo "$S" | jq -r .hex)   # 403 UTXO_FROZEN (72)
-stackctl submit --asset $TERANODE2_ASSET --hex $(echo "$S" | jq -r .hex)   # accepted (node 2 is unaware)
+CB=$(stackctl coinbase --height 1 | jq -r .txid)                 # block 1's coinbase, paid to the miner key
+KEY=$(stackctl newkey | jq -r .privateKeyHex)
+TX=$(stackctl spend --txid $CB --vout 0 --key "$(jq -r .minerWIF /config/inventory.json)" --to $KEY)
+stackctl submit --arcade $ARCADE_URL --hex $(echo "$TX" | jq -r .efHex)
+# {"via":"arcade","status":202,"accepted":true,"body":{"txid":"<txid>","status":202,"txStatus":"RECEIVED"}}
 ```
 
-Mine the spend on node 2 (`stack/scripts/mine.sh 2 1`) below the window and node 1 accepts the
-block; mine it inside the window and node 1 rejects it with a `UTXO_CONSENSUS_FROZEN` verdict
-on `invalid-blocks-teranode1`. Use `partition.sh 2 alert on` before the push to keep node 2
-unaware for longer than one sync round.
+Then, on the host:
 
-## Configuration
+```bash
+curl -s localhost:18080/tx/<txid> | jq '{txStatus, blockHeight}'     # ACCEPTED_BY_NETWORK within a second
+scripts/mine.sh 1 1
+curl -s localhost:18080/tx/<txid> | jq '{txStatus, blockHeight, merklePath}'
+# {"txStatus":"MINED","blockHeight":102,"merklePath":"…"}      # a few seconds later; merklePath is a BUMP (hex)
+```
 
-`make gen` renders everything from `cmd/gen/templates.go`; edit the templates, not the outputs.
+Fund the wallet and spend from it:
 
-| Path | What |
-|---|---|
-| `compose.yaml` | generated for N teranodes and SV SV nodes; profiles: default (nodes, SV nodes + sidecars, kafka, hub), `tools`, `arcade`, `merkle`, `wallet` |
-| `.env` (see `.env.example`) | `TERANODE_IMAGE` / `TERANODE_IMAGE_N` (per-node image), `TERANODE_MEM_LIMIT`, `SVNODE_IMAGE` / `SVNODE_IMAGE_J`, `SVNODE_MEM_LIMIT`, `ALERT_SYSTEM_IMAGE`, `TOOLS_IMAGE`, `HUB_HOST_PORT` |
-| `config/keys.json` | all identities and alert genesis keys — **regtest dev keys, committed on purpose**; never reuse them elsewhere |
-| `config/inventory.json` | names, pinned IPs, ports, peer ids, multiaddrs, in-network and host URLs, Kafka topics |
-| `config/teranode/common.env`, `teranodeN.env` | node settings; any teranode setting can be given as an env var of the same name (shown as `[ENV]` in the startup dump) |
-| `config/alert-system/config.json` | hub config (genesis keys, bootstrap = node 1, private-IP gater off) |
-| `config/svnode/svnodeJ.conf` | each SV node's bitcoin.conf (regtest follower: `connect=` every teranode's legacy port, `genesisactivationheight=100` to match teranode) |
-| `config/alert-system/svnodeJ.json` | each SV node's alert sidecar config (bootstrap = hub, `rpc_connections` = that SV node, retry every 30 s) |
-| `config/arcade/config.yaml`, `config/merkle-service.env`, `config/wallet-infra/` | the optional services |
-| `config/tools.env` | defaults for `alertctl` / `stackctl` in the tools container |
-| `patches/teranode/` | patches applied at image build: 0001 alert-P2P settings (PR 1767), 0002 legacy listener without a default route, 0003 `legacy_advertiseFullNode` |
-| `docker/go-alert-system.Dockerfile` | hub image (fully-qualified base images) |
-| `scripts/` | `rpc.sh`, `mine.sh`, `tips.sh`, `partition.sh` |
-| `spike/` | the milestone-0 single-node spike, kept for reference |
+```bash
+stackctl topup                                                     # in the tools container: coinbase → deposit address → mined → proven → credited
+curl -s localhost:18700/v1/state | jq '{balance, coins}'           # host: {"balance":100000,"coins":1}
+curl -s -X POST localhost:18700/v1/tx -H 'Content-Type: application/json' \
+     -d '{"shape":"opreturn","data":"hello bsv-regtest"}' | jq '{txid, status}'
+```
 
-Build variables (`make build-teranode TERANODE_REF=main TERANODE_TAG=main`): `TERANODE_REF`
-(default `fix/1422-height-anchored-freeze`), `TERANODE_TAG` (image tag, default `pr1764`),
-`TERANODE_REPO`, `ALERT_SYSTEM_REF` (default `v0.1.17`, the version teranode pins). Every patch
-in `patches/teranode/` must apply to the ref or the build stops with a clear message.
+Dashboards: http://localhost:20090 (teranode1), http://localhost:18080/ (arcade: its landing page
+is the API reference), http://localhost:18090/ (merkle-service, with a STUMP/BUMP visualizer).
 
-## Networks
+## What is running
 
-| network | subnet | carries |
+| container | host ports | notes |
 |---|---|---|
-| `chaos_chaosnet` | 10.190.0.0/24 | node↔node P2P (9905), legacy Bitcoin-wire P2P teranode↔SV node (18444), Kafka, datahub access for arcade/merkle |
-| `chaos_alertnet` | 192.0.0.128/26 | alert P2P: teranodes 9908, hub and SV sidecars 9906, tools. A reserved range libp2p treats as *public*, so go-alert-system's private-IP gater and DHT filter pass |
-| `chaos_ctlnet` | 10.191.0.0/24 | control plane: RPC 9292 (teranode) / 18332 (SV), asset 8090, propagation 8833, health 8000, hub and sidecar APIs 3000, arcade/merkle/wallet APIs |
+| `bsv-regtest-teranodeN` | base `20000+(N-1)*2000`: health `+0`, asset API + dashboard `+90`, propagation `+833`, RPC `+1292` | node 1: `:20000/health`, `:20090` dashboard and `:20090/api/v1/…`, `:21292` RPC (basic auth `bitcoin:bitcoin`); node 2: 22000/22090/22833/23292; node 3: 24000/24090/24833/25292 |
+| `bsv-regtest-svnodeJ` | `40000+(J-1)*1000+332` | RPC 40332, 41332 (`bitcoin:bitcoin`) |
+| `bsv-regtest-alert-svnodeJ` | `40000+(J-1)*1000+300` | the SV node's alert sidecar: `/health`, `/alerts` on 40300, 41300 |
+| `bsv-regtest-alert-system` | 3000 | alert hub: `/health` → `{sequence, active_peers, unprocessed_alerts, …}`, `/alerts` |
+| `bsv-regtest-arcade` | 18080 API + landing page, 18081 liveness, 18082 SSE `/events`, 18083 `/chaintracks/v2/*` | |
+| `bsv-regtest-merkle-service` | 18090 | `GET /` dashboard, `/health`, `/api/lookup/{txid}`, `POST /watch` |
+| `bsv-regtest-wallet-infra` | 18100 | BRC-100 storage server; a bare `GET /` returns `401 {"error":"authentication required"}` by design |
+| `bsv-regtest-walletd` | 18700 | `/healthz`, `/v1/deposit`, `/v1/state`, `/v1/outputs`, `/v1/actions`, `POST /v1/tx`, `POST /v1/internalize` |
+| `bsv-regtest-kafka-shared` | not published | `$RUNTIME exec bsv-regtest-kafka-shared rpk topic list` |
+| `bsv-regtest-tools` | – | `make tools` |
 
-All IPs are pinned (`ipv4_address`) and recorded in the inventory: teranodes `.11+`, SV nodes
-`.21+`, sidecars ctlnet `.31+` / alertnet `.151+`. Partitioning a node means disconnecting it
-from `chaosnet` (peer plane) or `alertnet` (alert plane; for an SV node that is its sidecar);
-`ctlnet` always stays, so RPC and asset access survive every partition. All three networks are
-`internal` (no egress) and host-published ports still work.
+In-network addresses (pinned IPs, peer ids, multiaddrs, URLs) are in `config/inventory.json`,
+the file every tool and script reads. Teranode's health endpoint is on the health port, not
+under `/api/v1`.
 
-## SV nodes and alert sidecars
+## Playing with the components
 
-SV Node (`bitcoind`) speaks the classic Bitcoin wire protocol, not teranode's libp2p mesh.
-Teranode bridges the two with its **legacy service**, enabled on every teranode when SV nodes
-are generated (`startLegacy=true`, listener `0.0.0.0:18444` on chaosnet). SV Node downloads
-blocks only from peers it dialed, so each SV node's `bitcoin.conf` lists every teranode (and
-the other SV nodes) as `connect=` targets; teranode-mined blocks are announced to it over the
-wire protocol and its bodies are served from the announcing teranode's asset API. Two teranode
-behaviours needed patches for this to work in the private stack: the legacy service refused
-to start without a default route (0002), and it announced itself as a pruned peer whenever the
-block persister height was zero, which SV Node never syncs from (0003, `legacy_advertiseFullNode`).
+### Arcade
 
-SV Node has no embedded alert service; on a real network an operator runs go-alert-system
-next to it. The stack does the same: `alert-svnodeJ` is a go-alert-system instance that joins
-the private alert network (bootstrap = the hub) and applies every alert to its SV node over RPC
-- freeze/unfreeze → `addToConsensusBlacklist`, confiscate → `addToConfiscationTxidWhitelist`,
-ban → `setban`, invalidate → `invalidateblock`. Its `/health` shows the `sequence` it holds and
-`unprocessed_alerts`, the alerts whose RPC apply failed (retried every 30 s). Because the sidecar
-speaks the same sync protocol as the teranodes' alert services, `alertctl push/probe` and the
-fleet's alert probe address the SV node through its sidecar's multiaddr (`SVNODEJ_ALERT_ADDR`).
-Check what is frozen on an SV node with `rpc.sh svJ queryBlacklist`.
+Arcade takes a transaction, validates it, fans it out to the teranode datahubs and tracks a
+status per txid. Its landing page (http://localhost:18080/) is generated from the server's
+route table and is the authoritative API reference. Standard-format transactions are accepted
+on this network (`/policy` reports `standardFormatSupported: true`); Extended Format saves
+arcade a round trip to the datahubs and is what `stackctl spend` prints as `efHex`. Arcade only
+knows transactions it received: a coinbase txid returns `404 {"error":"transaction not found"}`.
 
-Chain parameters: SV Node's regtest defaults match teranode's (go-chaincfg) except the
-Genesis-rules activation height, set to 100 in the conf to match teranode; teranode's
-Chronicle activation at height 200 has no SV counterpart, so keep experiments below height
-200 between resets. Mining stays on the teranodes; SV nodes are followers.
+```bash
+curl -s localhost:18080/health | jq '{healthy, blockHeight, datahub_urls}'
+curl -s -X POST localhost:18080/tx -H 'Content-Type: text/plain' --data "$HEX"        # or application/octet-stream, or JSON {"rawTx":…}
+curl -s localhost:18080/tx/$TXID | jq '{txStatus, blockHeight, blockHash, merklePath}'
+curl -N 'localhost:18082/events?callbackToken=demo'          # status events as SSE; ": keepalive" every 15 s
+curl -s localhost:18083/chaintracks/v2/tip | jq '{height, hash}'
+```
 
-### One SV node enforces standard-output policy
+Status lifecycle: `RECEIVED → SENT_TO_NETWORK → ACCEPTED_BY_NETWORK → SEEN_ON_NETWORK →
+SEEN_MULTIPLE_NODES → MINED → IMMUTABLE`, with `REJECTED`, `DOUBLE_SPEND_ATTEMPTED`,
+`PENDING_RETRY` and `STUMP_PROCESSING` on the side. Details, callback headers, events and the
+chaintracks endpoints: [`docs/arcade.md`](docs/arcade.md).
 
-The **last** SV node (`svnode2` in the default fleet) is generated with
-`acceptnonstdoutputs=0`; every other node keeps SV Node's permissive post-Genesis default. With
-only one SV node (`-sv 1`) nothing is made strict, so a permissive node always remains for
-comparison.
+### merkle-service
 
-This exists because the fleet genuinely disagrees about dust. After Genesis a bare
-`OP_RETURN <data>` output is **spendable**, so a zero-satoshi one is dust and the strict node
-refuses it with `64: dust`; the provably unspendable `OP_FALSE OP_RETURN <data>` form is exempt
-at any value. Teranode implements no dust rule and takes both, and arcade relays both happily
-(`RECEIVED` → `ACCEPTED_BY_NETWORK` → `MINED`) — so a transaction the rest of the fleet mines
-never enters the strict node's mempool, not even by relay from a peer holding it.
+merkle-service follows teranode's blocks and subtrees over libp2p, builds STUMP/BUMP proofs
+and calls arcade back for the transactions arcade registered. Its `/api/lookup/{txid}` returns
+callback **registrations**, not proofs; proofs come from any teranode
+(`/api/v1/merkle_proof/<txid>/json`) and as the `merklePath` BUMP on arcade's `GET /tx/{txid}`.
 
-`scenarios/svnode-dust-policy.yaml` pins that down as a characterisation test. Note that
-`-dustrelayfee` and `-dustlimitfactor` are rejected by SV Node 1.2.2 as removed options, so
-`acceptnonstdoutputs` is the only remaining lever over the dust rule. If a scenario needs a
-fleet that agrees about dust, drop the flag from `cmd/gen` rather than editing the generated
-conf, which `make gen` overwrites.
+```bash
+curl -s localhost:18090/health                                     # {"status":"healthy","details":{"backend":"connected"}}
+curl -s localhost:18090/api/lookup/$TXID                           # {"txid":"…","callbackUrls":[…]}
+curl -s localhost:20090/api/v1/merkle_proof/$TXID/json | jq '{blockHeight, path}'
+```
 
-## How alerts move
+### Wallet: wallet-infra and walletd
 
-- Every teranode's alert service bootstraps to the hub (`alert_p2p_bootstrap_peer`) and finds
-  the other nodes through the hub's DHT. Nodes and hub sync alerts from each other on every
-  discovery round (`alert_p2p_peer_discovery_interval`, 15 s here).
-- `alertctl push` delivers alerts to one chosen node immediately over the same sync protocol;
-  the rest of the fleet learns them on its next round unless partitioned.
-- Gossip publishing (`alertctl broadcast`) is dropped by go-alert-system v0.1.x, the version
-  teranode pins (bsv-blockchain/go-alert-system#171, fixed in v0.2.0). On this stack alerts
-  therefore travel only over the sync stream.
-- SV nodes receive alerts through their sidecars, which sync like any other alert-network
-  member and then call the SV node's RPC; a sidecar cut from alertnet stops at its current
-  sequence until healed.
-- Freezes can also be applied per node with the admin RPC (`rpc.sh N freeze …`), bypassing
-  the alert network; that is the only path for an unpatched upstream image, whose alert
-  service cannot bootstrap without internet access.
+wallet-infra is go-wallet-toolbox's BRC-100 **storage server** (`POST /` JSON-RPC and
+`/storage/v1/*` REST) behind BRC-103 mutual authentication, so plain `curl` gets a 401 by
+design; connect with go-wallet-toolbox's storage client or the TypeScript `StorageClient`.
+walletd is a small HTTP wallet that holds `walletUserKey` from `config/keys.json`, does the
+BRC-103 handshake for you and exposes the everyday operations. wallet-infra broadcasts through
+arcade and reads headers from arcade's chaintracks. A BRC-100 wallet credits a payment only
+from atomic BEEF with a verifiable merkle proof, so funding means paying the deposit address,
+mining, fetching the proof from arcade and internalizing; `stackctl topup` does all of it.
 
-## Arcade's chaintracks on regtest
+```bash
+curl -s localhost:18700/healthz
+curl -s localhost:18700/v1/deposit | jq '{address, suggestedSatoshis}'   # what `stackctl topup` pays
+curl -s localhost:18700/v1/state | jq '{connected, network, address, balance, coins}'
+curl -s localhost:18700/v1/outputs | jq '.outputs[] | {outpoint, satoshis}'
+curl -s -X POST localhost:18700/v1/tx -H 'Content-Type: application/json' \
+     -d '{"shape":"payment","satoshis":1000,"to":"<address>","labels":["demo"]}' | jq '{txid, status}'
+curl -s 'localhost:18700/v1/actions?include=1&limit=5' | jq '{total, buckets, actions: [.actions[] | {txid, status}]}'
+```
 
-arcade embeds go-chaintracks, which learns headers only from p2p block announcements (and
-backfills from the announcing node's asset API when a parent is missing). A freshly created
-container therefore sits at genesis (height 0) until the *next* block is mined - forever on an
-idle regtest - and the header state defaulted to `~/.chaintracks` inside the container, lost
-on every recreate. The generated `config/arcade/config.yaml` sets `chaintracks.bootstrap_url`
-(node 1's asset API, synced at startup) and `chaintracks.storage_path: /data/chaintracks` (on
-the arcade volume). Check with `curl localhost:18083/chaintracks/v2/tip`. Known limitation
-outside this repo: the go-chaintracks HTTP client used by wallet-infra subscribes to
-`/v2/tip/stream` once and never reconnects, so after an arcade restart the wallet's cached tip
-goes stale until wallet-infra is restarted (BEEF verification still fetches headers live).
+Shapes, funding flow and the storage-server protocols: [`docs/wallet.md`](docs/wallet.md).
 
-## Comparing builds
+### Teranode
 
-`TERANODE_IMAGE_<N>=ghcr.io/bsv-blockchain/teranode:latest` in `.env` runs node N on upstream
-`main` (pre-fix); `make clean && make up` (or `make reset` when the simulator is installed)
-recreates the node on the new image with a fresh chain - the sqlite schemas of the two builds
-differ, so never swap the image under an existing data directory. That image lacks the settings
-patch, so inside the private stack (no egress) its alert service never bootstraps: drive
-freezes on it with the admin RPC (`scripts/rpc.sh N freeze '["<txid>", <vout>, ""]'`) or, from
-the simulator, scenario `freeze-skew-rpc`.
+Each teranode publishes a dashboard and the asset API on the same port, JSON-RPC on `+1292`,
+health on `+0`. Read RPCs are served from a cache (`getchaintips` for 300 s), so observe chain
+state through the asset API. Any teranode setting can be given as an environment variable of
+the same name in `config/teranode/*.env` (the startup log shows `[ENV]` next to it); the keys
+are documented in the teranode repository under `docs/references/settings/`.
+
+```bash
+curl -s localhost:20000/health | jq '{status, services: [.services[].service]}'
+curl -s localhost:20090/api/v1/bestblockheader/json | jq '{height, hash}'
+curl -s localhost:20090/api/v1/block/height/1/json | jq '{height, coinbase: .coinbase_tx.txid}'
+curl -s localhost:20090/api/v1/utxos/$TXID/json | jq '.[] | {vout, status, satoshis}'     # OK | FROZEN | SPENT
+curl -s localhost:20090/api/v1/txmeta/$TXID/json | jq '{blockHeights, fee, isCoinbase}'
+scripts/rpc.sh 1 getblockchaininfo | jq .result
+scripts/rpc.sh 1 freeze '["<txid>", 0, ""]'          # admin RPC freeze on ONE node, bypassing the alert network
+scripts/mine.sh 2 1 <address>                          # mine one block on node 2 paying an address
+```
+
+### SV Nodes
+
+SV Node speaks the classic Bitcoin wire protocol; teranode bridges it with its legacy service,
+which the generator enables whenever SV nodes are present. SV Node downloads blocks only from
+peers it dialed, so each node's `bitcoin.conf` (`config/svnode/`) lists every teranode as a
+`connect=` target. `genesisactivationheight=100` matches teranode's regtest parameters. Mining
+stays on the teranodes. The **last** SV node is generated with `acceptnonstdoutputs=0`, so the
+fleet always contains one node with strict standard-output policy: a zero-satoshi bare
+`OP_RETURN <data>` output is dust there (`64: dust`) while every other node, teranode included,
+accepts it. Two teranode patches make this bridge work in a private network
+([`docs/patches.md`](docs/patches.md)).
+
+```bash
+scripts/rpc.sh sv1 getblockchaininfo | jq '.result | {blocks, bestblockhash}'
+scripts/rpc.sh sv1 getpeerinfo | jq '.result[] | {addr, services, inbound}'   # services …0021: NODE_NETWORK bit set
+scripts/rpc.sh sv1 queryBlacklist                                             # what the sidecar has frozen here
+```
+
+### Alert system
+
+The hub is a go-alert-system node acting as the alert network's bootstrap peer, DHT server and
+canonical store; the teranodes run their embedded alert service; each SV node gets a
+go-alert-system sidecar that applies alerts over RPC (freeze → `addToConsensusBlacklist`,
+confiscate → `addToConfiscationTxidWhitelist`, ban → `setban`, invalidate → `invalidateblock`).
+Alerts are signed with three of the five genesis keys in `config/keys.json` and are strictly
+sequenced; the tools container keeps the publisher log in `.data/tools/alerts.json`. They
+travel over the peer-to-peer sync stream (gossip publishing is dropped by go-alert-system
+v0.1.x, the version teranode pins).
+
+```bash
+curl -s localhost:3000/health | jq '{sequence, active_peers, unprocessed_alerts}'
+make tools
+CB=$(stackctl coinbase --height 3 | jq -r .txid)   # a mature coinbase nobody has spent
+alertctl build freeze --fund $CB:0:0:1000000       # sign alert #N freezing CB:0 (window in heights; see docs/alerts.md)
+alertctl push --peer $HUB_ALERT_ADDR               # the hub; every member has it within ~40 s
+alertctl push --peer $TERANODE1_ALERT_ADDR         # …or one member only, right now
+alertctl probe --peer $SVNODE1_ALERT_ADDR          # an SV node is addressed through its sidecar
+scripts/rpc.sh sv1 queryBlacklist                  # host: the sidecar applied it to svnode1
+```
+
+The worked example (freeze a coin everywhere, watch every node refuse the spend, unfreeze),
+what the height window means on each implementation, per-node delivery and the full
+`alertctl` reference: [`docs/alerts.md`](docs/alerts.md).
+
+## Configuration and regeneration
+
+`compose.yaml` and everything under `config/` are **generated** by `cmd/gen` from
+`cmd/gen/templates.go` and committed, so `make up` works without Go. Edit the templates, never
+the outputs.
+
+```bash
+make gen N=5 SV=1        # teranodes 2..10, SV nodes 0..5; keys.json is created once and kept
+make gen INTERNAL=1      # egress-free networks (see below)
+```
+
+`make` variables: `N`, `SV`, `RUNTIME` (`podman`|`docker`), `PROFILES` (default
+`--profile tools --profile arcade --profile merkle --profile wallet`), `TERANODE_REF` (default
+`main`), `TERANODE_TAG` (default: the ref with `/` replaced), `TERANODE_REPO`, `ALERT_SYSTEM_REF`
+(`v0.1.17`, the version teranode pins), `SVNODE_IMAGE`, `INTERNAL`, `EXTRA_PATCHES`.
+
+`.env` (copy `.env.example`; read by compose): per-node image overrides `TERANODE_IMAGE_N` /
+`SVNODE_IMAGE_J`, memory caps (`TERANODE_MEM_LIMIT` 3g, `SVNODE_MEM_LIMIT` 2g, …), the locally
+built image names, host ports (`HUB_HOST_PORT`, `ARCADE_HOST_PORT`, `MERKLE_HOST_PORT`,
+`WALLET_HOST_PORT`, `WALLETD_HOST_PORT`).
+
+Images: built here (`localhost/bsv-regtest/{teranode,alert-system,tools,walletd}`), pulled
+(arcade, merkle-service at a pinned digest, go-wallet-toolbox, postgres, redpanda, bitcoin-sv).
+Building teranode: [`docs/building-teranode.md`](docs/building-teranode.md).
+
+**`INTERNAL=1`** renders the three compose networks as `internal` (no egress at all). Nothing
+in the network *needs* the internet at run time, but with egress available teranode's embedded
+alert service also dials public libp2p DHT peers (go-alert-system's DHT client bootstraps from
+libp2p's default peer list as well as from the hub; on this host each teranode held connections
+to about a dozen public addresses). Nothing of yours travels there, since the alert topic is
+regtest-specific and alerts only move over direct sync streams, but for a network that cannot
+reach the internet at all use `INTERNAL=1`. Verified on Podman, where host-published ports keep
+working on internal networks; on Docker 28 published ports on internal networks should be
+reachable from the host itself, but that is unverified here, which is why it is opt-in.
+
+## How the pieces connect
+
+- **Networks:** chaosnet 10.190.0.0/24 (teranodes `.11+`, SV nodes `.21+`, kafka `.5`, arcade
+  `.40`, merkle `.41`, wallet-infra `.42`, wallet-db `.43`, walletd `.52`), alertnet
+  192.0.0.128/26 (hub `.130`, teranodes `.141+`, sidecars `.151+`, tools `.180`), ctlnet
+  10.191.0.0/24 (same last octets; sidecars `.31+`, tools `.50`). Names are
+  `bsv-regtest_chaosnet` etc. and are recorded in the inventory.
+- **Legacy bridge:** teranode's legacy service listens on chaosnet `:18444`; SV nodes dial it.
+- **Alert sidecars:** speak the same sync protocol as teranode's alert service; an SV node's
+  alert address in the inventory is its sidecar's multiaddr.
+- **Arcade ↔ merkle-service:** arcade registers `/watch` with its callback URL and token (from
+  `keys.json`); merkle-service calls back with the token as a bearer.
+- **Wallet:** wallet-infra posts to arcade and follows arcade's chaintracks; walletd talks to
+  wallet-infra over BRC-103. On regtest arcade's chaintracks bootstraps from a teranode's asset
+  API at startup and keeps its headers on the arcade volume.
+
+More in [`docs/networking.md`](docs/networking.md).
+
+## Stopping, wiping, upgrading
+
+```bash
+make down                    # stop and remove the containers, keep .data/ (chain, alerts, wallet DB)
+make clean                   # down + wipe .data/ through a busybox container (files belong to other uids)
+make build-teranode TERANODE_REF=v1.4.0 && make clean && make up   # another teranode build
+make gen N=4 SV=1 && make up # a different fleet; make clean first if the node set shrank
+```
+
+Never swap a teranode image under an existing `.data/teranodeN`: builds differ in their sqlite
+schemas. `make clean` first.
 
 ## Troubleshooting
 
-- **`short-name resolution enforced but cannot prompt`** during a build: an image reference
-  without a registry. Every image here is fully qualified; if you add one, qualify it.
-- **A node never becomes healthy**: `podman logs chaos-teranodeN`. The most common cause is
-  memory pressure (lower N or raise `TERANODE_MEM_LIMIT`). The generated settings already
-  include the admin gRPC key and raised asset rate limits that catch-up between nodes needs.
-- **Nodes disagree after an experiment**: that is usually the experiment working. To start
-  clean, `make clean && make up && make wait`.
-- **`Permission denied` on `stack/.data`**: files are owned by a subuid; `make clean` uses
-  `podman unshare rm -rf`.
-- **Changed N or a template**: `make gen N=… && make up` (containers whose config changed are
-  recreated; `make clean` first if the node set shrank).
-- **An SV node stays at height 0**: `rpc.sh svJ getpeerinfo` must show outbound peers whose
-  `services` include NODE_NETWORK (`…01`); `…0420` means the teranodes announce
-  NODE_NETWORK_LIMITED, i.e. the image lacks patch 0003 or `legacy_advertiseFullNode=true`
-  is missing from `common.env`. Teranode's own tests document an intermittent IBD stall on SV
-  Node 1.2.0 (headers received, `getdata` never sent); the default image is 1.2.2.
-- **`alert-svnodeJ` API not up**: go-alert-system starts its web server only after it has
-  connected to two alert peers; `make wait` reports this and moves on. It catches up on the
-  next discovery round.
-- **Alert sequence mismatch** (`push` says "nothing requested"): the tools log and the network
-  must agree on the sequence; `alertctl hub` shows the network's latest, `alertctl log` yours.
-  After `make clean`, also remove `stack/.data/tools/alerts.json` (part of `.data`, so already
-  gone) - and the simulator's `sim/.data/alerts.json` if it was used.
+- **First `make build` is slow (10–20 min, several GB).** Teranode compiles from source. Later
+  builds reuse `upstream/teranode` and the layer cache.
+- **Both SV nodes exited (139) with `boost::condition_variable::do_wait_until failed in
+  pthread_cond_timedwait: Invalid argument`** after the host suspended or its clock jumped. A
+  Boost issue in bitcoind, no data loss; the services restart on failure, or run `make up`.
+- **An SV node stays at height 0.** `scripts/rpc.sh sv1 getpeerinfo`: each peer's `services`
+  must have the NODE_NETWORK bit (last hex digit odd, `…0021` here). `…0420` means the
+  teranode image lacks patch 0003 or
+  `legacy_advertiseFullNode=true` is missing from `config/teranode/common.env`. SV Node 1.2.0 has
+  an intermittent initial-sync stall; the default image is 1.2.2.
+- **`alert-svnodeJ: API not up yet`** from `make wait`. go-alert-system opens its web server only
+  after two alert peers are connected; it catches up on the next 15 s discovery round.
+- **`Permission denied` under `.data/`.** SV Node and Postgres run as their own users, so their
+  files belong to subordinate uids on the host. `make clean` wipes through a container. Do not
+  `chown` the tree while the network runs.
+- **Port already in use.** Every service port except the teranode/SV node ranges is a variable in
+  `.env`; for the node ranges pick a smaller `N`/`SV` or stop what holds the port.
+- **Docker: `localhost/bsv-regtest/…` not found.** The image was not built on this host; run the
+  matching `make build-*` target. Locally built images carry `pull_policy: never`, so nothing is
+  ever pulled from a registry called `localhost`.
+- **`short-name resolution enforced but cannot prompt`** (Podman build). An image reference without
+  a registry; every image here is fully qualified, so qualify any you add.
+- **A teranode never becomes healthy.** `make wait` prints the last log lines after five minutes;
+  the usual cause is memory pressure (lower `N` or raise `TERANODE_MEM_LIMIT`).
+- **`alertctl push` says "nothing requested".** The publisher log (`alertctl log`) and the network
+  (`alertctl hub`) disagree on the latest sequence; after `make clean` both start empty.
+- **A teranode still reports the old alert sequence** a few seconds after a push to the hub.
+  Members pull alerts on their discovery rounds (15 s); the whole fleet is level within about
+  half a minute. `alertctl push --peer $TERANODEn_ALERT_ADDR` delivers to one member at once.
+- **The hub shows `unprocessed_alerts` > 0.** Its RPC points at a teranode, which has no SV-style
+  blacklist RPCs; that counter is not an error. The sidecars' counters are the ones to watch.
+- **Nodes disagree after an experiment.** Usually the experiment working; `make clean && make up
+  && make wait` starts over.
 
-## Reusing the stack on another network
+## Layout
 
-The inventory is network-agnostic (`network` is `regtest` today). A teratestnet variant drops
-the local teranodes and points arcade / merkle-service at public nodes, with real alert keys
-supplied through the environment instead of `keys.json`. That is planned, not done: the keys in
-this repository are for regtest only.
+```
+Makefile              runtime detection (RUNTIME=podman|docker); gen/build/up/down/wait/status/clean/test
+compose.yaml          GENERATED for N teranodes + SV nodes; profiles: default, tools, arcade, merkle, wallet
+config/               GENERATED: inventory.json (the contract), keys.json (dev keys, kept), teranode/*.env,
+                      svnode/*.conf, alert-system/*.json, arcade/config.yaml, merkle-service.env,
+                      wallet-infra/infra-config.yaml, tools.env
+cmd/gen               the generator (templates.go is the source of truth)
+cmd/alertctl          build/sign/push/probe alerts        cmd/stackctl   mine/spend/submit/topup
+alerts/ keys/ teranode/ topology/ wallet/    Go packages behind the CLIs (importable: github.com/bsv-blockchain/bsv-regtest/...)
+walletd/              HTTP wallet (own Go module on go-wallet-toolbox)
+patches/teranode/     0002 legacy listener without a default route, 0003 legacy_advertiseFullNode  -> docs/patches.md
+docker/               alert-system.Dockerfile, tools.Dockerfile
+scripts/              rpc.sh mine.sh tips.sh partition.sh
+docs/                 arcade.md wallet.md alerts.md networking.md building-teranode.md patches.md
+.data/                runtime state (gitignored)          upstream/  source checkouts for image builds (gitignored)
+```
+
+History: this network grew out of the chaos-test harness's stack; the legacy-service findings
+recorded in `docs/patches.md` came from a hand-run spike in September 2026.
+
+## Security: development keys
+
+`config/keys.json` is committed **on purpose** and contains private keys: the alert genesis
+keys, the libp2p identities of the hub, nodes and sidecars, the miner key, the wallet server and
+user keys, arcade's callback token and the teranode admin API key. Every RPC is `bitcoin:bitcoin`.
+Every container uses these values verbatim.
+
+- Never reuse any of them outside a throwaway regtest.
+- Never expose the host ports beyond localhost.
+- For fresh keys: `rm config/keys.json && make gen` (then `make clean && make up`).
+
+## Contributing and license
+
+See [`CONTRIBUTING.md`](CONTRIBUTING.md). Apache License 2.0, see [`LICENSE`](LICENSE) and
+[`NOTICE`](NOTICE); the patches under `patches/teranode/` modify Teranode and remain under
+Teranode's license.

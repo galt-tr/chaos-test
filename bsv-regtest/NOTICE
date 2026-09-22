@@ -1,0 +1,10 @@
+bsv-regtest
+Copyright 2026 BSV Association
+
+Licensed under the Apache License, Version 2.0 (see LICENSE).
+
+The files under patches/teranode/ are modifications of Teranode
+(https://github.com/bsv-blockchain/teranode) and remain subject to Teranode's own license.
+Container images pulled or built at run time (Teranode, go-alert-system, Bitcoin SV Node,
+arcade, merkle-service, go-wallet-toolbox, PostgreSQL, Redpanda, busybox) and the Go module
+dependencies are distributed under their own licenses and are not part of this repository.

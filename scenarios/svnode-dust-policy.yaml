@@ -4,7 +4,7 @@ description: >
   Pins down where the BSV fleet disagrees about "dust". Two transactions are built that differ by
   exactly ONE byte — a zero-satoshi data output whose script is either a bare "OP_RETURN <data>"
   or the provably unspendable "OP_FALSE OP_RETURN <data>" — and each is offered to a teranode, to
-  an SV node at SV Node's permissive post-Genesis default, and to the SV node cmd/gen configures
+  an SV node at SV Node's permissive post-Genesis default, and to the SV node bsv-regtest/cmd/gen configures
   with acceptnonstdoutputs=0.
 
   After Genesis a bare OP_RETURN output is SPENDABLE, so a zero-satoshi one is dust; the
@@ -30,7 +30,7 @@ requires: [regtest]
 roles:
   A: teranode1   # miner, and the teranode that should accept both forms
   SV: svnode1    # SV Node at its permissive post-Genesis default (acceptnonstdoutputs=1)
-  STRICT: svnode2 # the SV node cmd/gen gives acceptnonstdoutputs=0
+  STRICT: svnode2 # the SV node bsv-regtest/cmd/gen gives acceptnonstdoutputs=0
 params:
   # "OP_RETURN <'dust test'>" — spendable after Genesis, so zero satoshis makes it dust.
   bareScript: "6a09647573742074657374"
