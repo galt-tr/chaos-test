@@ -4,3 +4,7 @@ sim/.data/
 *.db
 *.sqlite
 .env
+/gen
+/alertctl
+/stackctl
+/orchestrator
