@@ -74,35 +74,23 @@ services:
       timeout: 5s
       retries: 20
 
-  data-init:
-    # One-shot: hands the go-alert-system data dirs to uid 65534, which the hub and sidecar
-    # images run as. Replaces the podman-only ":U" mount flag, which docker compose drops
-    # silently (a root-owned /data then fails with "unable to open database file"). Runs as
-    # root in both runtimes; under rootless podman the chown lands on the mapped subuid.
-    image: ${BUSYBOX_IMAGE:-docker.io/library/busybox:1.37}
-    container_name: {{ .Project }}-data-init
-    network_mode: none
-    command: ["sh", "-ec", "chown -R 65534:65534 /init/*"]
-    volumes:
-      - ./.data/alert-system:/init/alert-system:Z
-{{- range .SVNodes }}
-      - ./.data/alert-{{ .Name }}:/init/alert-{{ .Name }}:Z
-{{- end }}
-
   alert-system:
     # go-alert-system node: the private alert network's bootstrap peer, DHT server and
     # canonical alert store (GET /alerts, /health). Built by: make build-alert-system
     image: ${ALERT_SYSTEM_IMAGE:-localhost/{{ $.Project }}/alert-system:v0.1.17}
     pull_policy: never
     container_name: {{ .Project }}-alert-system
+    # The image defaults to an unprivileged user, which cannot write a bind-mounted host
+    # directory the runtime created (podman's ":U" chown flag fixes that, but docker compose
+    # drops it silently, and podman-compose does not order an init container reliably). Run as
+    # root in the container instead: under rootless podman that is your own user, under
+    # docker the files are root-owned like every other service's data here.
+    user: "0:0"
     networks:
       alertnet:
         ipv4_address: 192.0.0.130
       ctlnet:
         ipv4_address: 10.191.0.30
-    depends_on:
-      data-init:
-        condition: service_completed_successfully
     environment:
       ALERT_SYSTEM_ENVIRONMENT: local
       ALERT_SYSTEM_CONFIG_FILEPATH: /config/config.json
@@ -182,14 +170,13 @@ services:
     image: ${ALERT_SYSTEM_IMAGE:-localhost/{{ $.Project }}/alert-system:v0.1.17}
     pull_policy: never
     container_name: {{ .Sidecar.Container }}
+    user: "0:0"   # see alert-system
     networks:
       alertnet:
         ipv4_address: {{ .AlertIP }}
       ctlnet:
         ipv4_address: {{ .Sidecar.CtlIP }}
     depends_on:
-      data-init:
-        condition: service_completed_successfully
       alert-system:
         condition: service_started
       {{ .Name }}:

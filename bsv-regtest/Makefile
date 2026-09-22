@@ -19,7 +19,7 @@ UPSTREAM       := upstream
 PROFILES       ?= --profile tools --profile arcade --profile merkle --profile wallet
 # INTERNAL=1 renders egress-free compose networks (a `make gen` setting, not a compose variable)
 INTERNAL       ?=
-BUSYBOX_IMAGE  ?= docker.io/library/busybox:1.37
+BUSYBOX_IMAGE  ?= docker.io/library/busybox:1.37   # used by `make clean`
 # container runtime: podman if installed, else docker; override with RUNTIME=docker
 RUNTIME        ?= $(shell command -v podman >/dev/null 2>&1 && echo podman || echo docker)
 COMPOSE        ?= $(RUNTIME) compose
@@ -59,7 +59,6 @@ build-walletd: ## walletd image (the go-wallet-toolbox wallet sidecar; its own G
 	$(RUNTIME) build -t localhost/$(PROJECT)/walletd:local -f walletd/Dockerfile walletd
 
 up: ## start the network (teranodes, SV nodes + sidecars, kafka, alert hub) + profiles
-	@# data dir ownership for the uid-65534 alert containers is handled by the data-init service
 	mkdir -p .data
 	$(COMPOSE) $(PROFILES) up -d
 
