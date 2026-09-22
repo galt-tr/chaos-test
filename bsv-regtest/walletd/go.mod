@@ -1,4 +1,4 @@
-module github.com/bsv-blockchain/chaos-test/walletd
+module github.com/bsv-blockchain/bsv-regtest/walletd
 
 go 1.26.3
 

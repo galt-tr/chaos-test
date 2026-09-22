@@ -1,7 +1,6 @@
 sim/ui/node_modules/
 sim/ui/dist/
 sim/.data/
-sim/walletd/walletd
 *.db
 *.sqlite
 .env

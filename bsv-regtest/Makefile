@@ -13,12 +13,12 @@ UPSTREAM       := upstream
 # compose profiles started by `make up`; e.g. make up PROFILES="--profile tools"
 PROFILES       ?= --profile tools --profile arcade --profile merkle --profile wallet
 
-.PHONY: gen build build-tools build-teranode build-alert-system up down clean wait status logs tools test tidy
+.PHONY: gen build build-tools build-teranode build-alert-system build-walletd up down clean wait status logs tools test test-walletd tidy
 
 gen: ## regenerate compose.yaml + config/ for N teranodes and SV SV nodes (keys are kept)
 	go run ./cmd/gen -n $(N) -sv $(SV) -out . -teranode-image localhost/teranode-chaos:$(TERANODE_TAG) -svnode-image $(SVNODE_IMAGE)
 
-build: build-tools build-alert-system build-teranode ## build all images
+build: build-tools build-alert-system build-teranode build-walletd ## build all images
 
 build-tools: ## alertctl + stackctl image
 	podman build -t localhost/chaos-test:local -f docker/tools.Dockerfile .
@@ -41,6 +41,9 @@ build-alert-system: ## go-alert-system image (hub and SV sidecars; our Dockerfil
 	@if [ ! -d $(UPSTREAM)/go-alert-system/.git ]; then \
 	  git clone --depth 1 --branch $(ALERT_SYSTEM_REF) $(ALERT_SYSTEM_REPO) $(UPSTREAM)/go-alert-system; fi
 	podman build -t localhost/go-alert-system:$(ALERT_SYSTEM_REF) -f docker/alert-system.Dockerfile $(UPSTREAM)/go-alert-system
+
+build-walletd: ## walletd image (the go-wallet-toolbox wallet sidecar; its own Go module)
+	podman build -t localhost/chaos-walletd:local -f walletd/Dockerfile walletd
 
 up: ## start the network (teranodes, SV nodes + sidecars, kafka, alert hub) + profiles
 	mkdir -p .data/tools .data/alert-system .data/arcade .data/merkle-service .data/wallet-db
@@ -89,5 +92,8 @@ tools: ## shell in the tools container
 test: ## unit tests of the generator, CLIs and their packages
 	CGO_ENABLED=0 go test ./...
 
+test-walletd: ## walletd is a separate module outside go.work (it needs gorm's real sqlite driver)
+	cd walletd && GOWORK=off CGO_ENABLED=0 go test ./...
+
 tidy:
-	go mod tidy
+	go mod tidy && cd walletd && GOWORK=off go mod tidy

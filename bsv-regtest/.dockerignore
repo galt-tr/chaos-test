@@ -2,3 +2,4 @@ upstream/
 .data/
 .env
 config/keys.json
+walletd/

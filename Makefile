@@ -5,20 +5,16 @@ STACK          := bsv-regtest
 TERANODE_REF   ?= fix/1422-height-anchored-freeze
 TERANODE_TAG   ?= pr1764
 STACK_VARS      = TERANODE_REF=$(TERANODE_REF) TERANODE_TAG=$(TERANODE_TAG)
-STACK_TARGETS  := gen build build-tools build-teranode build-alert-system up down clean wait status logs tools tidy
+STACK_TARGETS  := gen build build-tools build-teranode build-alert-system build-walletd up down clean wait status logs tools tidy test-walletd
 
-.PHONY: $(STACK_TARGETS) test walletd-build test-walletd
+.PHONY: $(STACK_TARGETS) test walletd-build
 $(STACK_TARGETS):
 	$(MAKE) -C $(STACK) $(STACK_VARS) $@
 
+walletd-build: build-walletd ## kept for muscle memory
+
 test: ## both modules (go.work); walletd is a separate module, see test-walletd
 	CGO_ENABLED=0 go test ./...
-
-walletd-build: ## walletd image (the go-wallet-toolbox wallet sidecar; its own Go module)
-	podman build -t localhost/chaos-walletd:local -f sim/walletd/Dockerfile sim/walletd
-
-test-walletd: ## walletd is a nested module, so the main `go test ./...` does not reach it
-	cd sim/walletd && GOWORK=off CGO_ENABLED=0 go test ./...
 
 # ---- simulator layer ----------------------------------------------------------------------
 .PHONY: ui sim-build sim-up sim-down sim-logs reset
