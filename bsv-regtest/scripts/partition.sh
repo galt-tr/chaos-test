@@ -20,8 +20,9 @@ elif plane=="alert":
 else: sys.exit("plane must be p2p or alert")
 PY
 )
+rt=${RUNTIME:-$(command -v podman >/dev/null 2>&1 && echo podman || echo docker)}
 case "$action" in
-  on)  podman network disconnect "$net" "$ctr" && echo "$ctr partitioned from $net";;
-  off) podman network connect --ip "$ip" "$net" "$ctr" && echo "$ctr reconnected to $net as $ip";;
+  on)  "$rt" network disconnect "$net" "$ctr" && echo "$ctr partitioned from $net";;
+  off) "$rt" network connect --ip "$ip" "$net" "$ctr" && echo "$ctr reconnected to $net as $ip";;
   *) echo "action must be on or off" >&2; exit 2;;
 esac

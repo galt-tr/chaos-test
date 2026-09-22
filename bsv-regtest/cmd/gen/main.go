@@ -86,6 +86,7 @@ type svView struct {
 
 type view struct {
 	Project        string
+	Internal       bool // compose networks internal (egress-free)
 	N              int
 	Nodes          []nodeView
 	SV             int
@@ -118,6 +119,7 @@ func main() {
 	image := flag.String("teranode-image", "localhost/"+project+"/teranode:main", "default teranode image")
 	svImage := flag.String("svnode-image", "docker.io/bitcoinsv/bitcoin-sv:1.2.2", "default SV node image")
 	discovery := flag.String("alert-discovery-interval", "15s", "alert p2p peer discovery interval")
+	internal := flag.Bool("internal", false, "make the compose networks internal (no egress); host-published ports still work on podman, on docker only from the host itself")
 	flag.Parse()
 	if *n < 2 || *n > 10 {
 		fmt.Fprintln(os.Stderr, "-n must be in 2..10")
@@ -127,13 +129,13 @@ func main() {
 		fmt.Fprintln(os.Stderr, "-sv must be in 0..5")
 		os.Exit(2)
 	}
-	if err := run(*n, *sv, *out, *image, *svImage, *discovery); err != nil {
+	if err := run(*n, *sv, *out, *image, *svImage, *discovery, *internal); err != nil {
 		fmt.Fprintln(os.Stderr, "error:", err)
 		os.Exit(1)
 	}
 }
 
-func run(n, sv int, out, image, svImage, discovery string) error {
+func run(n, sv int, out, image, svImage, discovery string, internal bool) error {
 	cfgDir := filepath.Join(out, "config")
 	dirs := []string{filepath.Join(cfgDir, "teranode"), filepath.Join(cfgDir, "alert-system"), filepath.Join(out, "scripts")}
 	if sv > 0 {
@@ -149,7 +151,7 @@ func run(n, sv int, out, image, svImage, discovery string) error {
 		return err
 	}
 
-	v := view{Project: project, N: n, SV: sv, SVNodeImage: svImage, LegacyEnabled: sv > 0, TeranodeImage: image, Topic: alertTopic, Protocol: alertProtocol,
+	v := view{Project: project, Internal: internal, N: n, SV: sv, SVNodeImage: svImage, LegacyEnabled: sv > 0, TeranodeImage: image, Topic: alertTopic, Protocol: alertProtocol,
 		Generated: time.Now().UTC().Format(time.RFC3339), DiscoveryEvery: discovery, HubKey: kf.Hub.PrivateKeyHex, AdminAPIKey: kf.AdminAPIKey,
 		ArcadeToken: kf.ArcadeCallbackToken, WalletKey: kf.WalletServerKey.PrivateKeyHex}
 	v.Arcade = topology.Service{URL: "http://10.191.0.40:8080", HostURL: "http://localhost:18080", Container: ctr("arcade"),
@@ -329,7 +331,7 @@ func run(n, sv int, out, image, svImage, discovery string) error {
 	if err := writeJSON(filepath.Join(cfgDir, "inventory.json"), inv); err != nil {
 		return err
 	}
-	fmt.Printf("generated %d-teranode, %d-svnode stack under %s\n  podman compose -f %s/compose.yaml up -d\n", n, sv, out, out)
+	fmt.Printf("generated %d-teranode, %d-svnode network under %s\n  make up   (or: docker|podman compose -f %s/compose.yaml --profile tools --profile arcade --profile merkle --profile wallet up -d)\n", n, sv, out, out)
 	return nil
 }
 

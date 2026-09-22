@@ -13,16 +13,23 @@ ALERT_SYSTEM_REPO ?= https://github.com/bsv-blockchain/go-alert-system
 UPSTREAM       := upstream
 # compose profiles started by `make up`; e.g. make up PROFILES="--profile tools"
 PROFILES       ?= --profile tools --profile arcade --profile merkle --profile wallet
+# INTERNAL=1 renders egress-free compose networks (a `make gen` setting, not a compose variable)
+INTERNAL       ?=
+BUSYBOX_IMAGE  ?= docker.io/library/busybox:1.37
+# container runtime: podman if installed, else docker; override with RUNTIME=docker
+RUNTIME        ?= $(shell command -v podman >/dev/null 2>&1 && echo podman || echo docker)
+COMPOSE        ?= $(RUNTIME) compose
+export RUNTIME
 
 .PHONY: gen build build-tools build-teranode build-alert-system build-walletd up down clean wait status logs tools test test-walletd tidy
 
 gen: ## regenerate compose.yaml + config/ for N teranodes and SV SV nodes (keys are kept)
-	go run ./cmd/gen -n $(N) -sv $(SV) -out . -teranode-image localhost/$(PROJECT)/teranode:$(TERANODE_TAG) -svnode-image $(SVNODE_IMAGE)
+	go run ./cmd/gen -n $(N) -sv $(SV) -out . -teranode-image localhost/$(PROJECT)/teranode:$(TERANODE_TAG) -svnode-image $(SVNODE_IMAGE) $(if $(filter 1 true yes,$(INTERNAL)),-internal)
 
 build: build-tools build-alert-system build-teranode build-walletd ## build all images
 
 build-tools: ## alertctl + stackctl image
-	podman build -t localhost/$(PROJECT)/tools:local -f docker/tools.Dockerfile .
+	$(RUNTIME) build -t localhost/$(PROJECT)/tools:local -f docker/tools.Dockerfile .
 
 build-teranode: ## clone TERANODE_REF, apply the patches, build the image
 	@if [ ! -d $(UPSTREAM)/teranode/.git ]; then \
@@ -32,7 +39,7 @@ build-teranode: ## clone TERANODE_REF, apply the patches, build the image
 	  if git apply --3way --check $$p 2>/dev/null; then git apply --3way $$p && echo "applied $$(basename $$p)"; \
 	  elif git apply --reverse --check $$p 2>/dev/null; then echo "already applied $$(basename $$p)"; \
 	  else echo "PATCH $$(basename $$p) DOES NOT APPLY to $(TERANODE_REF) - fix patches/teranode first"; exit 1; fi; done
-	cd $(UPSTREAM)/teranode && podman build -t localhost/$(PROJECT)/teranode:$(TERANODE_TAG) \
+	cd $(UPSTREAM)/teranode && $(RUNTIME) build -t localhost/$(PROJECT)/teranode:$(TERANODE_TAG) \
 	  --build-arg BASE_IMG=ghcr.io/bsv-blockchain/teranode-base:build-latest \
 	  --build-arg RUN_IMG=ghcr.io/bsv-blockchain/teranode-base:run-latest \
 	  --build-arg GIT_SHA=$$(git rev-parse HEAD) --build-arg GIT_COMMIT=$$(git rev-parse --short HEAD) \
@@ -41,26 +48,21 @@ build-teranode: ## clone TERANODE_REF, apply the patches, build the image
 build-alert-system: ## go-alert-system image (hub and SV sidecars; our Dockerfile, fully-qualified base images)
 	@if [ ! -d $(UPSTREAM)/go-alert-system/.git ]; then \
 	  git clone --depth 1 --branch $(ALERT_SYSTEM_REF) $(ALERT_SYSTEM_REPO) $(UPSTREAM)/go-alert-system; fi
-	podman build -t localhost/$(PROJECT)/alert-system:$(ALERT_SYSTEM_REF) -f docker/alert-system.Dockerfile $(UPSTREAM)/go-alert-system
+	$(RUNTIME) build -t localhost/$(PROJECT)/alert-system:$(ALERT_SYSTEM_REF) -f docker/alert-system.Dockerfile $(UPSTREAM)/go-alert-system
 
 build-walletd: ## walletd image (the go-wallet-toolbox wallet sidecar; its own Go module)
-	podman build -t localhost/$(PROJECT)/walletd:local -f walletd/Dockerfile walletd
+	$(RUNTIME) build -t localhost/$(PROJECT)/walletd:local -f walletd/Dockerfile walletd
 
 up: ## start the network (teranodes, SV nodes + sidecars, kafka, alert hub) + profiles
-	mkdir -p .data/tools .data/alert-system .data/arcade .data/merkle-service .data/wallet-db
-	@# the hub image runs as USER 65534; compose asks for :U on .data/alert-system but
-	@# docker-compose (podman's preferred provider when installed) drops it, leaving the
-	@# dir owned by root inside the userns. Do the remap ourselves, provider-independent.
-	@podman unshare chown -R 65534:65534 .data/alert-system
-	@for j in $$(seq 1 $(SV)); do mkdir -p .data/svnode$$j .data/alert-svnode$$j; \
-	  podman unshare chown -R 65534:65534 .data/alert-svnode$$j; done
-	podman compose $(PROFILES) up -d
+	@# data dir ownership for the uid-65534 alert containers is handled by the data-init service
+	mkdir -p .data
+	$(COMPOSE) $(PROFILES) up -d
 
 down: ## stop and remove the network (keeps .data/)
-	podman compose $(PROFILES) down
+	$(COMPOSE) $(PROFILES) down
 
-clean: down ## also wipe chain/alert state
-	podman unshare rm -rf .data
+clean: down ## also wipe chain/alert state (through a container: the files belong to other uids)
+	@if [ -d .data ]; then $(RUNTIME) run --rm -v $(CURDIR)/.data:/d:Z $(BUSYBOX_IMAGE) sh -c 'rm -rf /d/* /d/.[!.]*' && rmdir .data; fi
 
 wait: ## wait until every node answers (teranode health port, SV node RPC, then sidecar health best-effort)
 	@# Bounded, and loud on failure: a container that exits at startup used to leave these
@@ -68,14 +70,14 @@ wait: ## wait until every node answers (teranode health port, SV node RPC, then 
 	@for n in $$(seq 1 $(N)); do port=$$((20000 + (n-1)*2000)); i=0; \
 	  until curl -sf --max-time 2 http://localhost:$$port/health >/dev/null 2>&1; do \
 	    i=$$((i+1)); if [ $$i -ge 150 ]; then echo "teranode$$n did not become healthy in 5m:"; \
-	      podman ps -a --filter name=$(PROJECT)-teranode$$n --format '  {{.Names}}  {{.Status}}'; \
-	      echo "  last logs:"; podman logs --tail 5 $(PROJECT)-teranode$$n 2>&1 | sed 's/^/    /'; exit 1; fi; \
+	      $(RUNTIME) ps -a --filter name=$(PROJECT)-teranode$$n --format '  {{.Names}}  {{.Status}}'; \
+	      echo "  last logs:"; $(RUNTIME) logs --tail 5 $(PROJECT)-teranode$$n 2>&1 | sed 's/^/    /'; exit 1; fi; \
 	    sleep 2; done; echo "teranode$$n healthy"; done
 	@for j in $$(seq 1 $(SV)); do port=$$((40000 + (j-1)*1000 + 332)); i=0; \
 	  until curl -sf --max-time 2 -u bitcoin:bitcoin -H 'content-type: application/json' -d '{"jsonrpc":"1.0","id":"w","method":"getblockcount","params":[]}' http://localhost:$$port >/dev/null 2>&1; do \
 	    i=$$((i+1)); if [ $$i -ge 150 ]; then echo "svnode$$j did not answer RPC in 5m:"; \
-	      podman ps -a --filter name=$(PROJECT)-svnode$$j --format '  {{.Names}}  {{.Status}}'; \
-	      echo "  last logs:"; podman logs --tail 5 $(PROJECT)-svnode$$j 2>&1 | sed 's/^/    /'; exit 1; fi; \
+	      $(RUNTIME) ps -a --filter name=$(PROJECT)-svnode$$j --format '  {{.Names}}  {{.Status}}'; \
+	      echo "  last logs:"; $(RUNTIME) logs --tail 5 $(PROJECT)-svnode$$j 2>&1 | sed 's/^/    /'; exit 1; fi; \
 	    sleep 2; done; echo "svnode$$j healthy"; done
 	@for j in $$(seq 1 $(SV)); do port=$$((40000 + (j-1)*1000 + 300)); i=0; \
 	  until curl -sf --max-time 2 http://localhost:$$port/health >/dev/null 2>&1 || [ $$i -ge 45 ]; do sleep 2; i=$$((i+1)); done; \
@@ -85,10 +87,10 @@ status: ## tips and alert sequences of every node
 	scripts/tips.sh
 
 logs: ## follow all logs
-	podman compose logs -f
+	$(COMPOSE) $(PROFILES) logs -f
 
 tools: ## shell in the tools container
-	podman exec -it $(PROJECT)-tools bash
+	$(RUNTIME) exec -it $(PROJECT)-tools bash
 
 test: ## unit tests of the generator, CLIs and their packages
 	CGO_ENABLED=0 go test ./...

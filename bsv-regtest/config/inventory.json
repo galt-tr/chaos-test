@@ -1,7 +1,7 @@
 {
   "project": "bsv-regtest",
   "network": "regtest",
-  "generated": "2026-09-22T02:13:22Z",
+  "generated": "2026-09-22T02:17:24Z",
   "networks": {
     "chaosnet": "10.190.0.0/24",
     "alertnet": "192.0.0.128/26",
