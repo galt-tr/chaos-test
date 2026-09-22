@@ -9,7 +9,6 @@ require (
 	github.com/libp2p/go-libp2p v0.49.0 // indirect
 	github.com/mrz1836/go-datastore v1.3.7 // indirect
 	github.com/multiformats/go-multiaddr v0.16.1 // indirect
-	github.com/stretchr/objx v0.5.3 // indirect
 	github.com/twmb/franz-go v1.21.7 // indirect
 	google.golang.org/protobuf v1.36.12 // indirect
 )

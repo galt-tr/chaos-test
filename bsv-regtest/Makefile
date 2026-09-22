@@ -103,5 +103,5 @@ test: ## unit tests of the generator, CLIs and their packages
 test-walletd: ## walletd is a separate module outside go.work (it needs gorm's real sqlite driver)
 	cd walletd && GOWORK=off CGO_ENABLED=0 go test ./...
 
-tidy:
-	go mod tidy && cd walletd && GOWORK=off go mod tidy
+tidy: ## GOWORK=off: in workspace mode `go mod tidy` would leave this module's go.sum incomplete for standalone builds
+	GOWORK=off go mod tidy && cd walletd && GOWORK=off go mod tidy

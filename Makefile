@@ -11,7 +11,7 @@ INTERNAL       ?= 1
 STACK_VARS      = TERANODE_REF=$(TERANODE_REF) TERANODE_TAG=$(TERANODE_TAG) INTERNAL=$(INTERNAL) EXTRA_PATCHES=$(EXTRA_PATCHES)
 RUNTIME        ?= $(shell command -v podman >/dev/null 2>&1 && echo podman || echo docker)
 COMPOSE        ?= $(RUNTIME) compose
-STACK_TARGETS  := gen build build-tools build-teranode build-alert-system build-walletd up down clean wait status logs tools tidy test-walletd
+STACK_TARGETS  := gen build build-tools build-teranode build-alert-system build-walletd up down clean wait status logs tools test-walletd
 
 .PHONY: $(STACK_TARGETS) test walletd-build
 $(STACK_TARGETS):
@@ -25,6 +25,9 @@ walletd-build: build-walletd ## kept for muscle memory
 
 test: ## both modules (go.work); walletd is a separate module, see test-walletd
 	CGO_ENABLED=0 go test ./...
+
+tidy: ## each module with GOWORK=off, so their go.sum files stay complete for standalone builds
+	GOWORK=off go mod tidy && $(MAKE) -C $(STACK) tidy
 
 # ---- simulator layer ----------------------------------------------------------------------
 .PHONY: ui sim-build sim-up sim-down sim-logs reset
