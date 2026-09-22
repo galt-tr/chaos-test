@@ -4,9 +4,13 @@ PROJECT        := bsv-regtest
 N              ?= 3
 SV             ?= 2
 SVNODE_IMAGE   ?= docker.io/bitcoinsv/bitcoin-sv:1.2.2
-TERANODE_REF   ?= fix/1422-height-anchored-freeze
-TERANODE_TAG   ?= pr1764
+# teranode is built from source at TERANODE_REF with the patches in patches/teranode applied;
+# EXTRA_PATCHES may name a second directory of patches (chaos-test uses it for its PR branch)
+TERANODE_REF   ?= main
+TERANODE_TAG   ?= $(subst /,-,$(TERANODE_REF))
 TERANODE_REPO  ?= https://github.com/bsv-blockchain/teranode
+EXTRA_PATCHES  ?=
+PATCH_FILES     = $(wildcard $(CURDIR)/patches/teranode/*.patch) $(if $(EXTRA_PATCHES),$(wildcard $(EXTRA_PATCHES)/*.patch))
 ALERT_SYSTEM_REF  ?= v0.1.17
 ALERT_SYSTEM_REPO ?= https://github.com/bsv-blockchain/go-alert-system
 # source checkouts used for image builds; never `vendor/`, which would switch Go to -mod=vendor
@@ -31,14 +35,15 @@ build: build-tools build-alert-system build-teranode build-walletd ## build all 
 build-tools: ## alertctl + stackctl image
 	$(RUNTIME) build -t localhost/$(PROJECT)/tools:local -f docker/tools.Dockerfile .
 
-build-teranode: ## clone TERANODE_REF, apply the patches, build the image
+build-teranode: ## check out TERANODE_REF into upstream/teranode, apply the patches, build the image
 	@if [ ! -d $(UPSTREAM)/teranode/.git ]; then \
-	  git clone --depth 1 --branch $(TERANODE_REF) $(TERANODE_REPO) $(UPSTREAM)/teranode; fi
-	cd $(UPSTREAM)/teranode && git diff --quiet || (echo "$(UPSTREAM)/teranode has local changes (patch already applied?) - continuing"; true)
-	cd $(UPSTREAM)/teranode && for p in ../../patches/teranode/*.patch; do \
+	  git clone --depth 1 --branch $(TERANODE_REF) $(TERANODE_REPO) $(UPSTREAM)/teranode; \
+	else echo "refreshing $(UPSTREAM)/teranode to $(TERANODE_REF) (a disposable build checkout: local changes are dropped)"; \
+	  git -C $(UPSTREAM)/teranode fetch -q --depth 1 origin $(TERANODE_REF) && git -C $(UPSTREAM)/teranode reset -q --hard FETCH_HEAD && git -C $(UPSTREAM)/teranode clean -fdq; fi
+	@cd $(UPSTREAM)/teranode && for p in $(PATCH_FILES); do \
 	  if git apply --3way --check $$p 2>/dev/null; then git apply --3way $$p && echo "applied $$(basename $$p)"; \
-	  elif git apply --reverse --check $$p 2>/dev/null; then echo "already applied $$(basename $$p)"; \
-	  else echo "PATCH $$(basename $$p) DOES NOT APPLY to $(TERANODE_REF) - fix patches/teranode first"; exit 1; fi; done
+	  elif git apply --reverse --check $$p 2>/dev/null; then echo "already in $(TERANODE_REF): $$(basename $$p)"; \
+	  else echo "PATCH $$(basename $$p) DOES NOT APPLY to $(TERANODE_REF); rebase it (see docs/patches.md)"; exit 1; fi; done
 	cd $(UPSTREAM)/teranode && $(RUNTIME) build -t localhost/$(PROJECT)/teranode:$(TERANODE_TAG) \
 	  --build-arg BASE_IMG=ghcr.io/bsv-blockchain/teranode-base:build-latest \
 	  --build-arg RUN_IMG=ghcr.io/bsv-blockchain/teranode-base:run-latest \

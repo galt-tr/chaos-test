@@ -4,9 +4,11 @@ STACK          := bsv-regtest
 # chaos-test builds the teranode PR under test; bsv-regtest on its own defaults to main.
 TERANODE_REF   ?= fix/1422-height-anchored-freeze
 TERANODE_TAG   ?= pr1764
+# patches the PR branch needs on top of bsv-regtest's own (0001 is already in teranode main)
+EXTRA_PATCHES  ?= $(CURDIR)/patches/teranode
 # the harness keeps the network egress-free (verified on podman); bsv-regtest alone defaults to open
 INTERNAL       ?= 1
-STACK_VARS      = TERANODE_REF=$(TERANODE_REF) TERANODE_TAG=$(TERANODE_TAG) INTERNAL=$(INTERNAL)
+STACK_VARS      = TERANODE_REF=$(TERANODE_REF) TERANODE_TAG=$(TERANODE_TAG) INTERNAL=$(INTERNAL) EXTRA_PATCHES=$(EXTRA_PATCHES)
 RUNTIME        ?= $(shell command -v podman >/dev/null 2>&1 && echo podman || echo docker)
 COMPOSE        ?= $(RUNTIME) compose
 STACK_TARGETS  := gen build build-tools build-teranode build-alert-system build-walletd up down clean wait status logs tools tidy test-walletd
@@ -14,6 +16,10 @@ STACK_TARGETS  := gen build build-tools build-teranode build-alert-system build-
 .PHONY: $(STACK_TARGETS) test walletd-build
 $(STACK_TARGETS):
 	$(MAKE) -C $(STACK) $(STACK_VARS) $@
+
+# bsv-regtest's committed compose.yaml is rendered with its own defaults (teranode main, open
+# networks); the harness re-renders with its settings before every `up` so they never drift.
+up: gen
 
 walletd-build: build-walletd ## kept for muscle memory
 
