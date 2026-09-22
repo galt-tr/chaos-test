@@ -15,8 +15,8 @@ import (
 // Every action this wallet creates carries labelWallet, so wallet-side truth can be queried
 // back with ListActions. Sustained-send actions add labelSend and a per-run label on top.
 const (
-	labelWallet = "chaos-wallet"
-	labelSend   = "chaos-wallet-send"
+	labelWallet = "bsv-regtest-wallet"
+	labelSend   = "bsv-regtest-wallet-send"
 )
 
 // Transaction shapes the harness can build.
@@ -72,7 +72,7 @@ func (w *Wallet) BuildTx(ctx context.Context, req TxRequest) (*TxResult, error) 
 	labels := append([]string{labelWallet}, req.Labels...)
 	desc := req.Description
 	if desc == "" {
-		desc = "chaos-test " + req.Shape
+		desc = "bsv-regtest " + req.Shape
 	}
 
 	no, delayed, wantTx := req.NoSend, req.Delayed, true

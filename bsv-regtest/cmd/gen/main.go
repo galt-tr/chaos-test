@@ -110,6 +110,7 @@ type view struct {
 	Arcade         topology.Service
 	Merkle         topology.Service
 	Wallet         topology.Service
+	Walletd        topology.Service
 }
 
 func main() {
@@ -166,6 +167,8 @@ func run(n, sv int, out, image, svImage, discovery string, internal bool) error 
 		Endpoint: topology.Endpoint{ChaosIP: "10.190.0.41", CtlIP: "10.191.0.41"}}
 	v.Wallet = topology.Service{URL: "http://10.191.0.42:8100", HostURL: "http://localhost:18100", Container: ctr("wallet-infra"),
 		Endpoint: topology.Endpoint{ChaosIP: "10.190.0.42", CtlIP: "10.191.0.42"}}
+	v.Walletd = topology.Service{URL: "http://10.191.0.52:8700", HostURL: "http://localhost:18700", Container: ctr("walletd"),
+		Endpoint: topology.Endpoint{ChaosIP: "10.190.0.52", CtlIP: "10.191.0.52"}}
 	for _, g := range kf.Genesis {
 		v.GenesisPubs = append(v.GenesisPubs, g.PublicKeyHex)
 	}
@@ -248,6 +251,7 @@ func run(n, sv int, out, image, svImage, discovery string, internal bool) error 
 	inv.Services["arcade"] = v.Arcade
 	inv.Services["merkle-service"] = v.Merkle
 	inv.Services["wallet-infra"] = v.Wallet
+	inv.Services["walletd"] = v.Walletd
 	teranodes := inv.Teranodes()
 	for i := range teranodes {
 		v.DatahubURLs = append(v.DatahubURLs, fmt.Sprintf("http://%s:8090/api/v1", teranodes[i].ChaosIP))

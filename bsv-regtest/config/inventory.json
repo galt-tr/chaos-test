@@ -1,7 +1,7 @@
 {
   "project": "bsv-regtest",
   "network": "regtest",
-  "generated": "2026-09-22T02:32:34Z",
+  "generated": "2026-09-22T03:06:29Z",
   "networks": {
     "chaosnet": "10.190.0.0/24",
     "alertnet": "192.0.0.128/26",
@@ -205,6 +205,13 @@
       "container": "bsv-regtest-wallet-infra",
       "ctlIP": "10.191.0.42",
       "chaosIP": "10.190.0.42"
+    },
+    "walletd": {
+      "url": "http://10.191.0.52:8700",
+      "hostURL": "http://localhost:18700",
+      "container": "bsv-regtest-walletd",
+      "ctlIP": "10.191.0.52",
+      "chaosIP": "10.190.0.52"
     }
   },
   "alert": {

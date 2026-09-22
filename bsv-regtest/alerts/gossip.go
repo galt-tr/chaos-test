@@ -105,7 +105,7 @@ func StartGossip(ctx context.Context, gc GossipConfig) (*Gossip, error) {
 	cfg.Services.Datastore = ds
 	cfg.Services.Log = &libLogger{lg: gc.Logger}
 	// Received alerts are "executed" against this mock so the publisher never touches a node.
-	cfg.Services.Node = config.NewNodeMock("chaos", "chaos", "http://127.0.0.1:1")
+	cfg.Services.Node = config.NewNodeMock("bsv-regtest", "bsv-regtest", "http://127.0.0.1:1")
 	cfg.Services.HTTPClient = http.DefaultClient
 
 	if err := models.CreateGenesisAlert(ctx, model.WithAllDependencies(cfg)); err != nil {

@@ -9,5 +9,5 @@ case "$n" in
   *)     port=$((20000 + (n-1)*2000 + 1292));;
 esac
 curl -s --max-time 300 -u "${RPC_USER:-bitcoin}:${RPC_PASS:-bitcoin}" -H 'Content-Type: application/json' \
-  -d "{\"jsonrpc\":\"1.0\",\"id\":\"chaos\",\"method\":\"$method\",\"params\":$params}" "http://localhost:$port"
+  -d "{\"jsonrpc\":\"1.0\",\"id\":\"bsv-regtest\",\"method\":\"$method\",\"params\":$params}" "http://localhost:$port"
 echo

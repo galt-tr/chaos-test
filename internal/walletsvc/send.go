@@ -412,4 +412,4 @@ func sleepCtx(ctx context.Context, d time.Duration) {
 	}
 }
 
-const labelSend = "chaos-wallet-send"
+const labelSend = "bsv-regtest-wallet-send"

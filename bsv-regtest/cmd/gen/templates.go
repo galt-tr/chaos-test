@@ -95,7 +95,7 @@ services:
       ALERT_SYSTEM_ENVIRONMENT: local
       ALERT_SYSTEM_CONFIG_FILEPATH: /config/config.json
     volumes:
-      - ./config/alert-system/config.json:/config/config.json:ro,Z
+      - ./config/alert-system/config.json:/config/config.json:ro,z
       - ./.data/alert-system:/data:Z
     ports:
       - "${HUB_HOST_PORT:-3000}:3000"
@@ -148,7 +148,7 @@ services:
     # /data so it can be mounted read-only.
     command: ["bitcoind", "-conf=/config/bitcoin.conf"]
     volumes:
-      - ./config/svnode/{{ .Name }}.conf:/config/bitcoin.conf:ro,Z
+      - ./config/svnode/{{ .Name }}.conf:/config/bitcoin.conf:ro,z
       - ./.data/{{ .Name }}:/data:Z
     ports:
       - "{{ .HostRPC }}:18332"   # rpc
@@ -185,7 +185,7 @@ services:
       ALERT_SYSTEM_ENVIRONMENT: local
       ALERT_SYSTEM_CONFIG_FILEPATH: /config/config.json
     volumes:
-      - ./config/alert-system/{{ .Name }}.json:/config/config.json:ro,Z
+      - ./config/alert-system/{{ .Name }}.json:/config/config.json:ro,z
       - ./.data/alert-{{ .Name }}:/data:Z
     ports:
       - "{{ .HostSidecarAPI }}:3000"
@@ -202,7 +202,7 @@ services:
         ipv4_address: 10.191.0.40
     command: ["--mode", "all", "--config", "/etc/arcade/config.yaml"]
     volumes:
-      - ./config/arcade/config.yaml:/etc/arcade/config.yaml:ro,Z
+      - ./config/arcade/config.yaml:/etc/arcade/config.yaml:ro,z
       - ./.data/arcade:/data:Z
     ports:
       - "${ARCADE_HOST_PORT:-18080}:8080"
@@ -275,7 +275,7 @@ services:
       TSTN_ARCADE_URL: http://10.190.0.40:8080
       TSTN_CHAINTRACKS_URL: http://10.190.0.40:8083/chaintracks
     volumes:
-      - ./config/wallet-infra/infra-config.yaml:/app/infra-config.yaml:ro,Z
+      - ./config/wallet-infra/infra-config.yaml:/app/infra-config.yaml:ro,z
     ports:
       - "${WALLET_HOST_PORT:-18100}:8100"
     mem_limit: ${WALLET_MEM_LIMIT:-512m}
@@ -303,7 +303,7 @@ services:
       BSV_NETWORK: tstn
       LISTEN: ":8700"
     volumes:
-      - ./config:/config:ro,Z
+      - ./config:/config:ro,z
     ports:
       - "${WALLETD_HOST_PORT:-18700}:8700"
     mem_limit: ${WALLETD_MEM_LIMIT:-256m}
@@ -323,7 +323,7 @@ services:
     env_file:
       - ./config/tools.env
     volumes:
-      - ./config:/config:ro,Z
+      - ./config:/config:ro,z
       - ./.data/tools:/data:Z
 `
 
@@ -438,6 +438,7 @@ SVNODE{{ .Index }}_SIDECAR={{ .Sidecar.APIURL }}
 {{ end }}ARCADE_URL={{ .Arcade.URL }}
 MERKLE_URL={{ .Merkle.URL }}
 WALLET_INFRA_URL={{ .Wallet.URL }}
+WALLETD_URL={{ .Walletd.URL }}
 `
 
 // svnodeConfTmpl: bitcoin.conf for an SV node that follows the teranodes. Derived from

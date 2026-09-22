@@ -118,8 +118,8 @@ export function HonestyNote() {
 export function WalletProblem({ reason, error }: { reason?: string; error?: string }) {
   const hint: Record<string, string> = {
     wallet_disabled: 'The wallet feature is off. Start walletd and pass -walletd to the orchestrator.',
-    wallet_unavailable: 'walletd is not reachable. It runs as chaos-walletd under the `wallet` compose profile — `make up` starts it.',
-    wallet_not_connected: 'walletd is running but cannot reach wallet-infra (the BRC-100 storage server). Check chaos-wallet-infra and its postgres.',
+    wallet_unavailable: 'walletd is not reachable. It runs as bsv-regtest-walletd under the `wallet` compose profile — `make up` starts it.',
+    wallet_not_connected: 'walletd is running but cannot reach wallet-infra (the BRC-100 storage server). Check bsv-regtest-wallet-infra and its postgres.',
     arcade_unavailable: 'Arcade is needed to prove a funding transaction before it can be credited.',
     no_spendable_coinbase: 'No unspent mature coinbase was found. Mine more blocks and retry.',
     immature_chain: 'The chain is below coinbase maturity (101 blocks). Mine, or allow the top up to mine for you.',

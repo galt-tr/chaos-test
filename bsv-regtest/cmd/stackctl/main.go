@@ -8,9 +8,11 @@
 //	stackctl coinbase --asset URL --height H            (prints the coinbase txid and hex)
 //	stackctl newkey                                      (fresh victim key: hex + regtest address)
 //	stackctl spend --asset URL --txid TXID --vout N --key WIF|HEX --to ADDRKEYHEX|--to-script HEX --sats N [--fee N]
-//	stackctl submit --asset URL --hex RAWTX | --rpc URL --hex RAWTX
+//	stackctl submit --asset URL --hex RAWTX | --rpc URL --hex RAWTX | --arcade URL --hex EFHEX
+//	stackctl topup --walletd URL --arcade URL [--sats N]   (fund the BRC-100 wallet from a coinbase)
 //
-// Defaults: NODE_RPC (http://…:9292), NODE_ASSET (http://…:8090/api/v1), RPC_USER/RPC_PASS.
+// Defaults: NODE_RPC / NODE_ASSET, else TERANODE1_RPC / TERANODE1_ASSET (set in the tools
+// container by config/tools.env), else localhost; RPC_USER/RPC_PASS; ARCADE_URL; WALLETD_URL.
 package main
 
 import (
@@ -62,6 +64,8 @@ func main() {
 		err = cmdSpend(ctx, os.Args[2:])
 	case "submit":
 		err = cmdSubmit(ctx, os.Args[2:])
+	case "topup":
+		err = cmdTopup(ctx, os.Args[2:])
 	default:
 		usage()
 		err = fmt.Errorf("unknown command %q", os.Args[1])
@@ -73,17 +77,17 @@ func main() {
 }
 
 func usage() {
-	fmt.Fprintln(os.Stderr, "stackctl rpc|mine|tip|txmeta|coinbase|newkey|spend|submit [flags]  (see source header)")
+	fmt.Fprintln(os.Stderr, "stackctl rpc|mine|tip|txmeta|coinbase|newkey|spend|submit|topup [flags]  (see source header)")
 }
 
 func rpcFlags(fs *flag.FlagSet) (*string, *string, *string) {
-	return fs.String("node", env("NODE_RPC", "http://localhost:21292"), "teranode RPC URL"),
+	return fs.String("node", env("NODE_RPC", env("TERANODE1_RPC", "http://localhost:21292")), "teranode RPC URL"),
 		fs.String("user", env("RPC_USER", "bitcoin"), "rpc user"),
 		fs.String("pass", env("RPC_PASS", "bitcoin"), "rpc password")
 }
 
 func assetFlag(fs *flag.FlagSet) *string {
-	return fs.String("asset", env("NODE_ASSET", "http://localhost:20090/api/v1"), "teranode asset API base URL (with /api/v1)")
+	return fs.String("asset", env("NODE_ASSET", env("TERANODE1_ASSET", "http://localhost:20090/api/v1")), "teranode asset API base URL (with /api/v1)")
 }
 
 func cmdRPC(ctx context.Context, args []string) error {

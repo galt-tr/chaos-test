@@ -35,7 +35,7 @@ func (c *RPCClient) Call(ctx context.Context, method string, params []any, out a
 	if params == nil {
 		params = []any{}
 	}
-	body, err := json.Marshal(map[string]any{"jsonrpc": "1.0", "id": "chaos", "method": method, "params": params})
+	body, err := json.Marshal(map[string]any{"jsonrpc": "1.0", "id": "bsv-regtest", "method": method, "params": params})
 	if err != nil {
 		return err
 	}

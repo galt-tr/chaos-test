@@ -126,7 +126,7 @@ func (w *Wallet) Internalize(ctx context.Context, req InternalizeRequest) (*Inte
 	}
 	desc := req.Description
 	if desc == "" {
-		desc = "chaos-test top up"
+		desc = "bsv-regtest top up"
 	}
 	if _, err := h.InternalizeAction(ctx, sdk.InternalizeActionArgs{
 		Tx: atomic,

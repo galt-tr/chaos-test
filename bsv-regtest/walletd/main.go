@@ -24,7 +24,7 @@ func main() {
 		storageURL = flag.String("storage", env("WALLET_INFRA_URL", ""), "go-wallet-toolbox storage server URL")
 		keysPath   = flag.String("keys", env("KEYS", "/config/keys.json"), "keys.json holding walletUserKey")
 		network    = flag.String("network", env("BSV_NETWORK", "tstn"), "bsv network")
-		originator = flag.String("originator", env("ORIGINATOR", "chaos-wallet.local"), "BRC-100 originator")
+		originator = flag.String("originator", env("ORIGINATOR", "bsv-regtest-wallet.local"), "BRC-100 originator")
 	)
 	flag.Parse()
 

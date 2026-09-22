@@ -1,10 +1,10 @@
 // Package main is walletd: a thin HTTP front end over a go-wallet-toolbox BRC-100 wallet.
 //
 // It is a separate Go module and a separate process on purpose. The toolbox pulls in ~300
-// modules and pins gorm's sqlite driver, while chaos-test replaces that driver with
-// glebarez/sqlite (which has no Config/New) for its alert datastore — so importing the
-// toolbox into the orchestrator's module cannot compile. Keeping it out here also means the
-// toolbox can be bumped without touching chaos-test's go.sum.
+// modules and pins gorm's sqlite driver, while the bsv-regtest module (and the chaos-test
+// harness on top of it) replaces that driver with glebarez/sqlite, which has no Config/New,
+// for the alert datastore — so importing the toolbox into those modules cannot compile.
+// Keeping it out here also means the toolbox can be bumped without touching their go.sum.
 package main
 
 import (
