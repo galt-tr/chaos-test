@@ -12,10 +12,11 @@ import json,sys
 inv,n,plane=json.load(open(sys.argv[1])),sys.argv[2],sys.argv[3]
 node=next((x for x in inv["nodes"] if x["name"]==n or (x.get("kind")!="svnode" and str(x["index"])==n)),None)
 if node is None: sys.exit(f"no node {n} in inventory")
-if plane=="p2p": print(node["container"], node["chaosIP"], "chaos_chaosnet")
+nets=inv.get("networks",{})
+if plane=="p2p": print(node["container"], node["chaosIP"], nets.get("chaosnetName") or sys.exit("inventory has no chaosnetName; re-run make gen"))
 elif plane=="alert":
     ctr=node["sidecar"]["container"] if node.get("kind")=="svnode" else node["container"]
-    print(ctr, node["alertIP"], "chaos_alertnet")
+    print(ctr, node["alertIP"], nets.get("alertnetName") or sys.exit("inventory has no alertnetName; re-run make gen"))
 else: sys.exit("plane must be p2p or alert")
 PY
 )

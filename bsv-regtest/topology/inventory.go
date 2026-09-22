@@ -9,10 +9,11 @@ import (
 	"strings"
 )
 
-// Inventory describes one generated stack.
+// Inventory describes one generated network.
 type Inventory struct {
-	Network   string             `json:"network"`   // regtest | teratestnet
-	Generated string             `json:"generated"` // RFC3339
+	Project   string             `json:"project,omitempty"` // compose project; containers <project>-<svc>, networks <project>_<net>
+	Network   string             `json:"network"`           // regtest | teratestnet
+	Generated string             `json:"generated"`         // RFC3339
 	Networks  Networks           `json:"networks"`
 	Nodes     []Node             `json:"nodes"`
 	Hub       *Hub               `json:"hub,omitempty"`
@@ -24,11 +25,15 @@ type Inventory struct {
 	MinerWIF  string             `json:"minerWIF"` // key the nodes' coinbase pays to (regtest dev key)
 }
 
-// Networks lists the compose networks and their subnets.
+// Networks lists the compose networks: their subnets and the names the container runtime
+// knows them by (what `network connect/disconnect` needs).
 type Networks struct {
-	Chaos string `json:"chaosnet"` // node p2p, datahub access
-	Alert string `json:"alertnet"` // alert p2p (public-looking subnet)
-	Ctl   string `json:"ctlnet"`   // control plane
+	Chaos     string `json:"chaosnet"` // node p2p, legacy p2p, datahub access
+	Alert     string `json:"alertnet"` // alert p2p (public-looking subnet)
+	Ctl       string `json:"ctlnet"`   // control plane
+	ChaosName string `json:"chaosnetName,omitempty"`
+	AlertName string `json:"alertnetName,omitempty"`
+	CtlName   string `json:"ctlnetName,omitempty"`
 }
 
 // Node is one node of the fleet: a teranode (Kind "teranode", or empty in older inventories)

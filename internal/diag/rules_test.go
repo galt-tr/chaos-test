@@ -12,7 +12,7 @@ import (
 // test then perturbs.
 func allOK(node string, height uint32, tip string) *Diagnostics {
 	d := &Diagnostics{
-		Node: node, Container: "chaos-" + node, ContainerState: "running",
+		Node: node, Container: "bsv-regtest-" + node, ContainerState: "running",
 		Tip:     &TipInfo{Height: height, Hash: tip},
 		FSM:     &teranode.FSMInfo{State: "RUNNING", StateValue: 1},
 		Catchup: &teranode.CatchupStatus{},

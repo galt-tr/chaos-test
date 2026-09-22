@@ -1,10 +1,14 @@
 {
+  "project": "bsv-regtest",
   "network": "regtest",
-  "generated": "2026-09-18T11:45:16Z",
+  "generated": "2026-09-22T02:13:22Z",
   "networks": {
     "chaosnet": "10.190.0.0/24",
     "alertnet": "192.0.0.128/26",
-    "ctlnet": "10.191.0.0/24"
+    "ctlnet": "10.191.0.0/24",
+    "chaosnetName": "bsv-regtest_chaosnet",
+    "alertnetName": "bsv-regtest_alertnet",
+    "ctlnetName": "bsv-regtest_ctlnet"
   },
   "nodes": [
     {
@@ -27,7 +31,7 @@
       "hostBase": 20000,
       "kafkaRejectedTx": "rejectedtx-teranode1",
       "kafkaInvalidBlocks": "invalid-blocks-teranode1",
-      "container": "chaos-teranode1",
+      "container": "bsv-regtest-teranode1",
       "legacyAddr": "10.190.0.11:18444"
     },
     {
@@ -50,7 +54,7 @@
       "hostBase": 22000,
       "kafkaRejectedTx": "rejectedtx-teranode2",
       "kafkaInvalidBlocks": "invalid-blocks-teranode2",
-      "container": "chaos-teranode2",
+      "container": "bsv-regtest-teranode2",
       "legacyAddr": "10.190.0.12:18444"
     },
     {
@@ -73,7 +77,7 @@
       "hostBase": 24000,
       "kafkaRejectedTx": "rejectedtx-teranode3",
       "kafkaInvalidBlocks": "invalid-blocks-teranode3",
-      "container": "chaos-teranode3",
+      "container": "bsv-regtest-teranode3",
       "legacyAddr": "10.190.0.13:18444"
     },
     {
@@ -96,7 +100,7 @@
       "hostBase": 40000,
       "kafkaRejectedTx": "",
       "kafkaInvalidBlocks": "",
-      "container": "chaos-svnode1",
+      "container": "bsv-regtest-svnode1",
       "legacyPeers": [
         "10.190.0.11:18444",
         "10.190.0.12:18444",
@@ -105,7 +109,7 @@
       ],
       "sidecar": {
         "name": "alert-svnode1",
-        "container": "chaos-alert-svnode1",
+        "container": "bsv-regtest-alert-svnode1",
         "ctlIP": "10.191.0.31",
         "apiURL": "http://10.191.0.31:3000",
         "hostAPIURL": "http://localhost:40300"
@@ -131,7 +135,7 @@
       "hostBase": 41000,
       "kafkaRejectedTx": "",
       "kafkaInvalidBlocks": "",
-      "container": "chaos-svnode2",
+      "container": "bsv-regtest-svnode2",
       "legacyPeers": [
         "10.190.0.11:18444",
         "10.190.0.12:18444",
@@ -140,7 +144,7 @@
       ],
       "sidecar": {
         "name": "alert-svnode2",
-        "container": "chaos-alert-svnode2",
+        "container": "bsv-regtest-alert-svnode2",
         "ctlIP": "10.191.0.32",
         "apiURL": "http://10.191.0.32:3000",
         "hostAPIURL": "http://localhost:41300"
@@ -154,18 +158,18 @@
     "alertAddr": "/ip4/192.0.0.130/tcp/9906/p2p/12D3KooWKsvJigHNVRpZCsKYJJfyd1HTBNKob1YWKRKj6CbD93NR",
     "apiURL": "http://10.191.0.30:3000",
     "hostAPIURL": "http://localhost:3000",
-    "container": "chaos-alert-system"
+    "container": "bsv-regtest-alert-system"
   },
   "tools": {
     "alertIP": "192.0.0.180",
     "ctlIP": "10.191.0.50",
-    "container": "chaos-tools"
+    "container": "bsv-regtest-tools"
   },
   "services": {
     "arcade": {
       "url": "http://10.191.0.40:8080",
       "hostURL": "http://localhost:18080",
-      "container": "chaos-arcade",
+      "container": "bsv-regtest-arcade",
       "urls": {
         "chaintracks": {
           "url": "http://10.191.0.40:8083",
@@ -185,20 +189,20 @@
     },
     "kafka": {
       "url": "kafka-shared:9092",
-      "container": "chaos-kafka-shared",
+      "container": "bsv-regtest-kafka-shared",
       "chaosIP": "10.190.0.5"
     },
     "merkle-service": {
       "url": "http://10.191.0.41:8080",
       "hostURL": "http://localhost:18090",
-      "container": "chaos-merkle-service",
+      "container": "bsv-regtest-merkle-service",
       "ctlIP": "10.191.0.41",
       "chaosIP": "10.190.0.41"
     },
     "wallet-infra": {
       "url": "http://10.191.0.42:8100",
       "hostURL": "http://localhost:18100",
-      "container": "chaos-wallet-infra",
+      "container": "bsv-regtest-wallet-infra",
       "ctlIP": "10.191.0.42",
       "chaosIP": "10.190.0.42"
     }

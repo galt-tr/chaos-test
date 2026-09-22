@@ -7,13 +7,13 @@ x-podman:
 networks:
   chaosnet:
     external: true
-    name: chaos_chaosnet
+    name: bsv-regtest_chaosnet
   alertnet:
     external: true
-    name: chaos_alertnet
+    name: bsv-regtest_alertnet
   ctlnet:
     external: true
-    name: chaos_ctlnet
+    name: bsv-regtest_ctlnet
 
 services:
   orchestrator:

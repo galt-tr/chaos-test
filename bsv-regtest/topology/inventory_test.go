@@ -1,6 +1,9 @@
 package topology
 
-import "testing"
+import (
+	"encoding/json"
+	"testing"
+)
 
 func TestUseHostURLs(t *testing.T) {
 	inv := &Inventory{
@@ -55,5 +58,25 @@ func TestNodeLookupSkipsSVIndex(t *testing.T) {
 	inv.UseHostURLs()
 	if inv.Nodes[2].Sidecar.APIURL != "http://localhost:40300" {
 		t.Fatalf("sidecar URL not rewritten: %s", inv.Nodes[2].Sidecar.APIURL)
+	}
+}
+
+func TestNetworkNamesRoundTrip(t *testing.T) {
+	in := Inventory{Project: "bsv-regtest", Networks: Networks{Chaos: "10.190.0.0/24", ChaosName: "bsv-regtest_chaosnet", AlertName: "bsv-regtest_alertnet", CtlName: "bsv-regtest_ctlnet"}}
+	b, err := json.Marshal(in)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var out Inventory
+	if err := json.Unmarshal(b, &out); err != nil {
+		t.Fatal(err)
+	}
+	if out.Project != "bsv-regtest" || out.Networks.ChaosName != "bsv-regtest_chaosnet" || out.Networks.AlertName != "bsv-regtest_alertnet" || out.Networks.CtlName != "bsv-regtest_ctlnet" || out.Networks.Chaos != "10.190.0.0/24" {
+		t.Fatalf("round trip lost fields: %+v", out)
+	}
+	// Older inventories without names still decode; consumers must treat "" as "re-run gen".
+	var legacy Inventory
+	if err := json.Unmarshal([]byte(`{"networks":{"chaosnet":"10.190.0.0/24"}}`), &legacy); err != nil || legacy.Networks.ChaosName != "" {
+		t.Fatalf("legacy decode: %v %+v", err, legacy.Networks)
 	}
 }

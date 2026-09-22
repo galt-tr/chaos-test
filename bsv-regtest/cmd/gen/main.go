@@ -27,6 +27,15 @@ import (
 	"github.com/bsv-blockchain/bsv-regtest/topology"
 )
 
+// project names everything the container runtime sees: compose project, containers
+// (<project>-<service>), networks (<project>_<net>) and locally built images
+// (localhost/<project>/<image>:<tag>). Fixed on purpose: inventory, Makefile and docs stay
+// trivially consistent, and nothing needs a second instance on one host.
+const project = "bsv-regtest"
+
+// ctr is the container name of a compose service.
+func ctr(service string) string { return project + "-" + service }
+
 const (
 	alertTopic    = "bitcoin_alert_system_regtest"
 	alertProtocol = "/bitcoin/alert-system/1.0.0"
@@ -76,6 +85,7 @@ type svView struct {
 }
 
 type view struct {
+	Project        string
 	N              int
 	Nodes          []nodeView
 	SV             int
@@ -105,7 +115,7 @@ func main() {
 	n := flag.Int("n", 3, "number of teranodes (2..10)")
 	sv := flag.Int("sv", 2, "number of SV nodes following the teranodes (0..5), each with an alert sidecar")
 	out := flag.String("out", ".", "output directory (the bsv-regtest module root)")
-	image := flag.String("teranode-image", "localhost/teranode-chaos:pr1764", "default teranode image")
+	image := flag.String("teranode-image", "localhost/"+project+"/teranode:main", "default teranode image")
 	svImage := flag.String("svnode-image", "docker.io/bitcoinsv/bitcoin-sv:1.2.2", "default SV node image")
 	discovery := flag.String("alert-discovery-interval", "15s", "alert p2p peer discovery interval")
 	flag.Parse()
@@ -139,10 +149,10 @@ func run(n, sv int, out, image, svImage, discovery string) error {
 		return err
 	}
 
-	v := view{N: n, SV: sv, SVNodeImage: svImage, LegacyEnabled: sv > 0, TeranodeImage: image, Topic: alertTopic, Protocol: alertProtocol,
+	v := view{Project: project, N: n, SV: sv, SVNodeImage: svImage, LegacyEnabled: sv > 0, TeranodeImage: image, Topic: alertTopic, Protocol: alertProtocol,
 		Generated: time.Now().UTC().Format(time.RFC3339), DiscoveryEvery: discovery, HubKey: kf.Hub.PrivateKeyHex, AdminAPIKey: kf.AdminAPIKey,
 		ArcadeToken: kf.ArcadeCallbackToken, WalletKey: kf.WalletServerKey.PrivateKeyHex}
-	v.Arcade = topology.Service{URL: "http://10.191.0.40:8080", HostURL: "http://localhost:18080", Container: "chaos-arcade",
+	v.Arcade = topology.Service{URL: "http://10.191.0.40:8080", HostURL: "http://localhost:18080", Container: ctr("arcade"),
 		Endpoint: topology.Endpoint{ChaosIP: "10.190.0.40", CtlIP: "10.191.0.40"},
 		// Secondary listeners (ports per the compose template): health, SSE tx events, chaintracks.
 		URLs: map[string]topology.URLPair{
@@ -150,28 +160,29 @@ func run(n, sv int, out, image, svImage, discovery string) error {
 			"events":      {URL: "http://10.191.0.40:8082", HostURL: "http://localhost:18082"},
 			"chaintracks": {URL: "http://10.191.0.40:8083", HostURL: "http://localhost:18083"},
 		}}
-	v.Merkle = topology.Service{URL: "http://10.191.0.41:8080", HostURL: "http://localhost:18090", Container: "chaos-merkle-service",
+	v.Merkle = topology.Service{URL: "http://10.191.0.41:8080", HostURL: "http://localhost:18090", Container: ctr("merkle-service"),
 		Endpoint: topology.Endpoint{ChaosIP: "10.190.0.41", CtlIP: "10.191.0.41"}}
-	v.Wallet = topology.Service{URL: "http://10.191.0.42:8100", HostURL: "http://localhost:18100", Container: "chaos-wallet-infra",
+	v.Wallet = topology.Service{URL: "http://10.191.0.42:8100", HostURL: "http://localhost:18100", Container: ctr("wallet-infra"),
 		Endpoint: topology.Endpoint{ChaosIP: "10.190.0.42", CtlIP: "10.191.0.42"}}
 	for _, g := range kf.Genesis {
 		v.GenesisPubs = append(v.GenesisPubs, g.PublicKeyHex)
 	}
 	v.GenesisPipe = strings.Join(v.GenesisPubs, " | ")
 	v.Hub = topology.Hub{
-		AlertIP: "192.0.0.130", CtlIP: "10.191.0.30", PeerID: kf.Hub.PeerID, Container: "chaos-alert-system",
+		AlertIP: "192.0.0.130", CtlIP: "10.191.0.30", PeerID: kf.Hub.PeerID, Container: ctr("alert-system"),
 		APIURL: "http://10.191.0.30:3000", HostAPI: "http://localhost:3000",
 	}
 	v.Hub.AlertAddr = fmt.Sprintf("/ip4/%s/tcp/9906/p2p/%s", v.Hub.AlertIP, v.Hub.PeerID)
 
 	inv := topology.Inventory{
-		Network: "regtest", Generated: v.Generated,
-		Networks: topology.Networks{Chaos: "10.190.0.0/24", Alert: "192.0.0.128/26", Ctl: "10.191.0.0/24"},
-		Hub:      &v.Hub, RPCUser: rpcUser, RPCPass: rpcPass, MinerWIF: minerWIF,
-		Tools: &topology.Endpoint{AlertIP: "192.0.0.180", CtlIP: "10.191.0.50", Container: "chaos-tools"},
+		Project: project, Network: "regtest", Generated: v.Generated,
+		Networks: topology.Networks{Chaos: "10.190.0.0/24", Alert: "192.0.0.128/26", Ctl: "10.191.0.0/24",
+			ChaosName: project + "_chaosnet", AlertName: project + "_alertnet", CtlName: project + "_ctlnet"},
+		Hub: &v.Hub, RPCUser: rpcUser, RPCPass: rpcPass, MinerWIF: minerWIF,
+		Tools: &topology.Endpoint{AlertIP: "192.0.0.180", CtlIP: "10.191.0.50", Container: ctr("tools")},
 		Alert: topology.AlertNetwork{Topic: alertTopic, ProtocolID: alertProtocol, GenesisPubKeys: v.GenesisPubs, Bootstrap: v.Hub.AlertAddr},
 		Services: map[string]topology.Service{
-			"kafka": {URL: "kafka-shared:9092", Container: "chaos-kafka-shared", Endpoint: topology.Endpoint{ChaosIP: "10.190.0.5"}},
+			"kafka": {URL: "kafka-shared:9092", Container: ctr("kafka-shared"), Endpoint: topology.Endpoint{ChaosIP: "10.190.0.5"}},
 		},
 	}
 	for i := 1; i <= n; i++ {
@@ -179,7 +190,7 @@ func run(n, sv int, out, image, svImage, discovery string) error {
 		nk := kf.Nodes[name]
 		base := 20000 + (i-1)*2000
 		node := topology.Node{
-			Kind: "teranode", Name: name, Index: i, Container: "chaos-" + name,
+			Kind: "teranode", Name: name, Index: i, Container: ctr(name),
 			ChaosIP: fmt.Sprintf("10.190.0.%d", 10+i), AlertIP: fmt.Sprintf("192.0.0.%d", 140+i), CtlIP: fmt.Sprintf("10.191.0.%d", 10+i),
 			PeerID: nk.P2P.PeerID, AlertPeerID: nk.Alert.PeerID, HostBase: base,
 			KafkaRejectedTx: "rejectedtx-" + name, KafkaInvalidBlocks: "invalid-blocks-" + name,
@@ -205,14 +216,14 @@ func run(n, sv int, out, image, svImage, discovery string) error {
 		sk := kf.SVNodes[name]
 		base := 40000 + (j-1)*1000
 		node := topology.Node{
-			Kind: "svnode", Name: name, Index: j, Container: "chaos-" + name,
+			Kind: "svnode", Name: name, Index: j, Container: ctr(name),
 			ChaosIP: fmt.Sprintf("10.190.0.%d", 20+j), CtlIP: fmt.Sprintf("10.191.0.%d", 20+j),
 			AlertIP: fmt.Sprintf("192.0.0.%d", 150+j), AlertPeerID: sk.Alert.PeerID, HostBase: base,
 		}
 		node.AlertAddr = fmt.Sprintf("/ip4/%s/tcp/9906/p2p/%s", node.AlertIP, node.AlertPeerID)
 		node.RPCURL = fmt.Sprintf("http://%s:18332", node.CtlIP)
 		node.HostRPCURL = fmt.Sprintf("http://localhost:%d", base+332)
-		node.Sidecar = &topology.Sidecar{Name: "alert-" + name, Container: "chaos-alert-" + name,
+		node.Sidecar = &topology.Sidecar{Name: "alert-" + name, Container: ctr("alert-" + name),
 			CtlIP: fmt.Sprintf("10.191.0.%d", 30+j), APIURL: fmt.Sprintf("http://10.191.0.%d:3000", 30+j), HostAPI: fmt.Sprintf("http://localhost:%d", base+300)}
 		inv.Nodes = append(inv.Nodes, node)
 	}

@@ -980,9 +980,9 @@ func (s *Server) Partition(ctx context.Context, node, plane string, on bool) err
 	container := n.Container
 	switch plane {
 	case "p2p":
-		network, ip = "chaos_chaosnet", n.ChaosIP
+		network, ip = s.d.Inventory.Networks.ChaosName, n.ChaosIP
 	case "alert":
-		network, ip = "chaos_alertnet", n.AlertIP
+		network, ip = s.d.Inventory.Networks.AlertName, n.AlertIP
 		if n.IsSV() {
 			// An SV node is not on the alert network itself; its sidecar is.
 			if n.Sidecar == nil {
@@ -992,6 +992,9 @@ func (s *Server) Partition(ctx context.Context, node, plane string, on bool) err
 		}
 	default:
 		return fmt.Errorf("plane must be p2p or alert, got %q", plane)
+	}
+	if network == "" {
+		return fmt.Errorf("inventory carries no compose network name for the %s plane; re-run make gen", plane)
 	}
 	// Network operations are serialised and verified: concurrent teardowns have been seen to
 	// leave one container still attached, which silently defeats a partition.
