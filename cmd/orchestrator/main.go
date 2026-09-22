@@ -23,17 +23,17 @@ import (
 	"syscall"
 	"time"
 
-	"github.com/bsv-blockchain/chaos-test/internal/alerts"
+	"github.com/bsv-blockchain/bsv-regtest/alerts"
+	"github.com/bsv-blockchain/bsv-regtest/keys"
+	"github.com/bsv-blockchain/bsv-regtest/teranode"
+	"github.com/bsv-blockchain/bsv-regtest/topology"
 	"github.com/bsv-blockchain/chaos-test/internal/api"
 	"github.com/bsv-blockchain/chaos-test/internal/arcade"
 	"github.com/bsv-blockchain/chaos-test/internal/automine"
 	"github.com/bsv-blockchain/chaos-test/internal/chaos"
 	"github.com/bsv-blockchain/chaos-test/internal/diag"
-	"github.com/bsv-blockchain/chaos-test/internal/keys"
 	"github.com/bsv-blockchain/chaos-test/internal/observe"
 	"github.com/bsv-blockchain/chaos-test/internal/scenario"
-	"github.com/bsv-blockchain/chaos-test/internal/teranode"
-	"github.com/bsv-blockchain/chaos-test/internal/topology"
 	"github.com/bsv-blockchain/chaos-test/internal/walletsvc"
 )
 
@@ -50,8 +50,8 @@ type keysFile struct {
 }
 
 func main() {
-	invPath := flag.String("inventory", env("INVENTORY", "stack/config/inventory.json"), "inventory.json")
-	keysPath := flag.String("keys", env("KEYS", "stack/config/keys.json"), "keys.json")
+	invPath := flag.String("inventory", env("INVENTORY", "bsv-regtest/config/inventory.json"), "inventory.json")
+	keysPath := flag.String("keys", env("KEYS", "bsv-regtest/config/keys.json"), "keys.json")
 	dataDir := flag.String("data", env("DATA", "sim/.data"), "data directory (alert log, keyring, runs)")
 	listen := flag.String("listen", env("LISTEN", ":8600"), "listen address")
 	kafka := flag.String("kafka", env("KAFKA_BROKERS", ""), "kafka brokers for verdict topics (empty = off)")

@@ -1,4 +1,4 @@
-# Builds the chaos-test Go binaries (alertctl now; orchestrator later).
+# Tools image: alertctl and stackctl built from this module (build context: the bsv-regtest directory).
 FROM docker.io/library/golang:1.26-alpine AS builder
 WORKDIR /src
 COPY go.mod go.sum ./

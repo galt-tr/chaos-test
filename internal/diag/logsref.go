@@ -4,9 +4,9 @@ import (
 	"context"
 	"strings"
 
+	"github.com/bsv-blockchain/bsv-regtest/topology"
 	"github.com/bsv-blockchain/chaos-test/internal/chaos"
 	"github.com/bsv-blockchain/chaos-test/internal/logs"
-	"github.com/bsv-blockchain/chaos-test/internal/topology"
 )
 
 // annotateRejections fills in WHY a block was rejected.

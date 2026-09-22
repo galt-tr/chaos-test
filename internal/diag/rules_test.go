@@ -5,7 +5,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/bsv-blockchain/chaos-test/internal/teranode"
+	"github.com/bsv-blockchain/bsv-regtest/teranode"
 )
 
 // allOK builds a Diagnostics whose every source succeeded, as the healthy baseline each

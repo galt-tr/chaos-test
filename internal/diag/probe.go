@@ -9,10 +9,10 @@ import (
 	"sync"
 	"time"
 
+	"github.com/bsv-blockchain/bsv-regtest/teranode"
+	"github.com/bsv-blockchain/bsv-regtest/topology"
 	"github.com/bsv-blockchain/chaos-test/internal/chaos"
 	"github.com/bsv-blockchain/chaos-test/internal/observe"
-	"github.com/bsv-blockchain/chaos-test/internal/teranode"
-	"github.com/bsv-blockchain/chaos-test/internal/topology"
 )
 
 // Budgets. Each probe gets its own deadline so one slow source cannot delay the rest, and

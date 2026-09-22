@@ -20,9 +20,9 @@ import (
 
 	"gopkg.in/yaml.v3"
 
+	"github.com/bsv-blockchain/bsv-regtest/topology"
 	"github.com/bsv-blockchain/chaos-test/internal/api"
 	"github.com/bsv-blockchain/chaos-test/internal/observe"
-	"github.com/bsv-blockchain/chaos-test/internal/topology"
 )
 
 // Definition is a scenario file.

@@ -1,0 +1,5 @@
+/upstream/
+/.data/
+/.env
+*.db
+*.sqlite

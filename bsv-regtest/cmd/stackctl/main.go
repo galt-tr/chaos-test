@@ -26,8 +26,8 @@ import (
 	"strings"
 	"time"
 
-	"github.com/bsv-blockchain/chaos-test/internal/teranode"
-	"github.com/bsv-blockchain/chaos-test/internal/wallet"
+	"github.com/bsv-blockchain/bsv-regtest/teranode"
+	"github.com/bsv-blockchain/bsv-regtest/wallet"
 )
 
 func env(k, d string) string {

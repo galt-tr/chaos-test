@@ -17,15 +17,15 @@ import (
 	"sync"
 	"time"
 
-	"github.com/bsv-blockchain/chaos-test/internal/alerts"
+	"github.com/bsv-blockchain/bsv-regtest/alerts"
+	"github.com/bsv-blockchain/bsv-regtest/teranode"
+	"github.com/bsv-blockchain/bsv-regtest/topology"
+	"github.com/bsv-blockchain/bsv-regtest/wallet"
 	"github.com/bsv-blockchain/chaos-test/internal/arcade"
 	"github.com/bsv-blockchain/chaos-test/internal/automine"
 	"github.com/bsv-blockchain/chaos-test/internal/chaos"
 	"github.com/bsv-blockchain/chaos-test/internal/observe"
 	"github.com/bsv-blockchain/chaos-test/internal/svnode"
-	"github.com/bsv-blockchain/chaos-test/internal/teranode"
-	"github.com/bsv-blockchain/chaos-test/internal/topology"
-	"github.com/bsv-blockchain/chaos-test/internal/wallet"
 	"github.com/bsv-blockchain/chaos-test/internal/walletsvc"
 )
 

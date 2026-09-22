@@ -9,12 +9,12 @@ import (
 	"strings"
 	"time"
 
-	"github.com/bsv-blockchain/chaos-test/internal/alerts"
+	"github.com/bsv-blockchain/bsv-regtest/alerts"
+	"github.com/bsv-blockchain/bsv-regtest/teranode"
 	"github.com/bsv-blockchain/chaos-test/internal/api"
 	"github.com/bsv-blockchain/chaos-test/internal/arcade"
 	"github.com/bsv-blockchain/chaos-test/internal/automine"
 	"github.com/bsv-blockchain/chaos-test/internal/chaos"
-	"github.com/bsv-blockchain/chaos-test/internal/teranode"
 	"github.com/bsv-blockchain/chaos-test/internal/walletsvc"
 )
 

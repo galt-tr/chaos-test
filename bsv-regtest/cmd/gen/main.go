@@ -2,7 +2,7 @@
 // env files and bitcoin.conf files, the alert hub and sidecar configs, keys.json (created
 // once, then reused) and inventory.json.
 //
-//	go run ./cmd/gen -n 3 -sv 2 -out stack
+//	go run ./cmd/gen -n 3 -sv 2 -out .      (or: make gen N=3 SV=2)
 //
 // Addressing (all pinned): chaosnet 10.190.0.0/24 (kafka .5, teranodeN .10+N, svnodeJ .20+J,
 // arcade .40, merkle .41, wallet .42), alertnet 192.0.0.128/26 (gw .129, hub .130, teranodeN
@@ -23,8 +23,8 @@ import (
 	"text/template"
 	"time"
 
-	"github.com/bsv-blockchain/chaos-test/internal/keys"
-	"github.com/bsv-blockchain/chaos-test/internal/topology"
+	"github.com/bsv-blockchain/bsv-regtest/keys"
+	"github.com/bsv-blockchain/bsv-regtest/topology"
 )
 
 const (
@@ -104,7 +104,7 @@ type view struct {
 func main() {
 	n := flag.Int("n", 3, "number of teranodes (2..10)")
 	sv := flag.Int("sv", 2, "number of SV nodes following the teranodes (0..5), each with an alert sidecar")
-	out := flag.String("out", "stack", "output directory")
+	out := flag.String("out", ".", "output directory (the bsv-regtest module root)")
 	image := flag.String("teranode-image", "localhost/teranode-chaos:pr1764", "default teranode image")
 	svImage := flag.String("svnode-image", "docker.io/bitcoinsv/bitcoin-sv:1.2.2", "default SV node image")
 	discovery := flag.String("alert-discovery-interval", "15s", "alert p2p peer discovery interval")

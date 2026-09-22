@@ -1,4 +1,4 @@
-# Simulator layer: attaches to a running stack (../stack) via its networks and inventory.
+# Simulator layer: attaches to a running bsv-regtest network (../bsv-regtest) via its networks and inventory.
 #   cd sim && podman compose up -d --build     →  http://localhost:8600
 # Chaos actions need the podman socket: systemctl --user enable --now podman.socket
 x-podman:
@@ -33,7 +33,7 @@ services:
       KAFKA_BROKERS: ${KAFKA_BROKERS:-kafka-shared:9092}
       DOCKER_HOST: unix:///var/run/docker.sock
     volumes:
-      - ../stack/config:/config:ro,Z
+      - ../bsv-regtest/config:/config:ro,Z
       - ../scenarios:/scenarios:ro,Z
       - ./.data:/data:Z
       - ${XDG_RUNTIME_DIR}/podman/podman.sock:/var/run/docker.sock

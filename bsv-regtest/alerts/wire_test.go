@@ -13,7 +13,7 @@ import (
 	"github.com/bsv-blockchain/go-alert-system/app/models/model"
 	"github.com/mrz1836/go-datastore"
 
-	"github.com/bsv-blockchain/chaos-test/internal/keys"
+	"github.com/bsv-blockchain/bsv-regtest/keys"
 )
 
 func genesisKeys(t *testing.T, n int) (privs, pubs []string) {

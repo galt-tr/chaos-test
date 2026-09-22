@@ -30,8 +30,8 @@ import (
 	"syscall"
 	"time"
 
-	"github.com/bsv-blockchain/chaos-test/internal/alerts"
-	"github.com/bsv-blockchain/chaos-test/internal/keys"
+	"github.com/bsv-blockchain/bsv-regtest/alerts"
+	"github.com/bsv-blockchain/bsv-regtest/keys"
 )
 
 // KeysFile is the shape of keys.json shared by the stack generator and alertctl.

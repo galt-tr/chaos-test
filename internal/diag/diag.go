@@ -9,7 +9,7 @@ package diag
 import (
 	"time"
 
-	"github.com/bsv-blockchain/chaos-test/internal/teranode"
+	"github.com/bsv-blockchain/bsv-regtest/teranode"
 )
 
 // Source names, in the order they are reported.

@@ -1,6 +1,6 @@
-# Builds the go-alert-system hub used as the private alert network's bootstrap/DHT server.
-# Build context: a checkout of github.com/bsv-blockchain/go-alert-system (see Makefile,
-# ALERT_SYSTEM_REF). Fully-qualified image names so podman needs no short-name prompt.
+# Builds go-alert-system: the private alert network's hub (bootstrap/DHT server) and the SV
+# nodes' alert sidecars. Build context: a checkout of github.com/bsv-blockchain/go-alert-system
+# (make build-alert-system, ALERT_SYSTEM_REF). Fully-qualified image names so podman needs no short-name prompt.
 FROM docker.io/library/golang:1.26-alpine AS builder
 WORKDIR /src
 COPY go.mod go.sum ./
