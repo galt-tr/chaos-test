@@ -79,7 +79,7 @@ function NodeCard({ n, status, run }: ActionProps) {
     <div className={`panel node ${n.reachable ? '' : 'down'}`}>
       <div className="row between">
         <h2 style={{ margin: 0 }}>
-          {n.name} <span className="muted lower">{sv ? `SV Node${n.version ? ` · ${n.version}` : ''}` : n.version ? `v${n.version}` : ''}</span>
+          {n.name} <span className="muted lower">{sv ? `SV Node${n.version ? ` · ${n.version}` : ''}` : n.version ? `${n.version}${n.commit ? ` · ${n.commit}` : ''}` : ''}</span>
         </h2>
         <span className="row">
           {n.partitions?.map((p) => <Pill key={p} ok={false} title={`${p} plane disconnected${sv && p === 'alert' ? ' (sidecar)' : ''}`}>{p} plane cut</Pill>)}

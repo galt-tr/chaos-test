@@ -38,6 +38,7 @@ type NodeState struct {
 	SidecarURL       string `json:"sidecarURL,omitempty"`
 	SidecarContainer string `json:"sidecarContainer,omitempty"`
 	Version          string `json:"version,omitempty"`
+	Commit           string `json:"commit,omitempty"` // teranode only
 	Container        string `json:"container"`
 	// HostURL is the node's own asset dashboard as a browser on the host can reach it
 	// (teranodes only). Static config, so it stays set even while the node is unreachable.
@@ -162,6 +163,7 @@ func NewFleet(inv *topology.Inventory, bus *Bus, alertHost *alerts.Host, lg *slo
 			}
 		} else {
 			f.asset[n.Name] = teranode.NewAssetClient(n.AssetURL)
+			f.asset[n.Name].User, f.asset[n.Name].Pass = inv.RPCUser, inv.RPCPass
 			// The dashboard is served at the asset origin, and HostAssetURL points at /api/v1
 			// beneath it. HostAssetURL rather than AssetURL: UseHostURLs rewrites AssetURL to the
 			// host URL in -host-mode but leaves HostAssetURL alone, so only HostAssetURL is
@@ -499,8 +501,8 @@ func (f *Fleet) pollNode(ctx context.Context, node topology.Node, probeAlerts bo
 			st.Mempool = clean
 		}
 		if st.Version == "" {
-			if v, err := f.rpc[node.Name].Version(cctx); err == nil {
-				st.Version = v
+			if v, commit, err := f.asset[node.Name].BuildInfo(cctx); err == nil {
+				st.Version, st.Commit = v, commit
 			}
 		}
 	}
