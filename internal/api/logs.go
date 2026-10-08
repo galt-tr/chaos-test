@@ -50,8 +50,13 @@ func (s *Server) getLogs(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if s.d.Runtime.Kind() == "none" {
-		writeErrReason(w, http.StatusServiceUnavailable, reasonNoRuntime, chaos.ErrNoRuntime,
-			map[string]any{"runtime": "none"})
+		// The runtime's own error carries why it is missing (e.g. a directory where the engine
+		// socket should have been mounted); the page shows that text.
+		err := chaos.ErrNoRuntime
+		if d := chaos.Reason(s.d.Runtime); d != "" {
+			err = fmt.Errorf("%w: %s", chaos.ErrNoRuntime, d)
+		}
+		writeErrReason(w, http.StatusServiceUnavailable, reasonNoRuntime, err, map[string]any{"runtime": "none"})
 		return
 	}
 

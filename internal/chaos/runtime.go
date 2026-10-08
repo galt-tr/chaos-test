@@ -1,7 +1,8 @@
 // Package chaos drives the container runtime for fault injection: network partitions
 // (connect/disconnect a container from a compose network with its pinned IP), pause,
-// stop and start. It speaks the Docker-compatible REST API over the podman socket, and
-// falls back to the podman CLI when no socket is available (e.g. running on the host).
+// stop and start. It speaks the Docker Engine API over the engine's unix socket (docker, or
+// podman, which serves the same API) and falls back to the docker/podman CLI when no socket
+// is available (e.g. running on the host).
 package chaos
 
 import (
@@ -56,35 +57,97 @@ type LogResult struct {
 // unbounded window on a long-running container is tens of megabytes.
 const DefaultMaxLogBytes = 8 << 20
 
-// New picks the socket API if socketPath (or DOCKER_HOST, or a well-known socket) exists,
-// else the podman/docker CLI, else a runtime that reports its absence.
+// apiBase is the unversioned API root; the daemon then applies its own current version.
+// Docker Engine 29.0-29.2 refuse requests pinned below v1.44 (29.3 lowered the floor to
+// v1.40) and podman accepts any version prefix or none, so leaving the version out is the
+// one form every engine answers.
+const apiBase = "http://d"
+
+// New picks the engine socket when socketPath (or DOCKER_HOST, or a well-known docker/podman
+// socket) is a unix socket, else the docker/podman CLI, else a runtime that reports its
+// absence and why (see Reason).
 func New(socketPath string) Runtime {
-	if socketPath == "" {
-		socketPath = strings.TrimPrefix(os.Getenv("DOCKER_HOST"), "unix://")
+	path, reason := firstSocket(socketCandidates(socketPath, os.Getenv))
+	if path != "" {
+		return newSocketRuntime(path)
 	}
-	if socketPath == "" {
-		for _, p := range []string{"/var/run/docker.sock", os.Getenv("XDG_RUNTIME_DIR") + "/podman/podman.sock"} {
-			if _, err := os.Stat(p); err == nil {
-				socketPath = p
-				break
+	for _, bin := range cliOrder(os.Getenv("RUNTIME")) {
+		if _, err := exec.LookPath(bin); err == nil {
+			return &cliRuntime{bin: bin}
+		}
+	}
+	return &noRuntime{reason: reason}
+}
+
+// socketCandidates lists the socket paths to try, most specific first: the explicit path,
+// DOCKER_HOST (unix:// only), then the well-known docker and podman sockets, rootless and
+// root. Empty entries (an unset XDG_RUNTIME_DIR) and duplicates are dropped.
+func socketCandidates(explicit string, getenv func(string) string) []string {
+	var out []string
+	add := func(p string) {
+		if p == "" {
+			return
+		}
+		for _, q := range out {
+			if q == p {
+				return
 			}
 		}
+		out = append(out, p)
 	}
-	if socketPath != "" {
-		if _, err := os.Stat(socketPath); err == nil {
-			return &socketRuntime{path: socketPath, http: &http.Client{Transport: &http.Transport{
-				DialContext: func(ctx context.Context, _, _ string) (net.Conn, error) {
-					return (&net.Dialer{}).DialContext(ctx, "unix", socketPath)
-				}}, Timeout: 60 * time.Second}}
+	add(explicit)
+	if h := getenv("DOCKER_HOST"); strings.HasPrefix(h, "unix://") {
+		add(strings.TrimPrefix(h, "unix://"))
+	}
+	add("/var/run/docker.sock")
+	if x := getenv("XDG_RUNTIME_DIR"); x != "" {
+		add(x + "/docker.sock")
+		add(x + "/podman/podman.sock")
+	}
+	add("/run/podman/podman.sock")
+	return out
+}
+
+// firstSocket returns the first candidate that is a unix socket. When none is, reason says
+// why. A candidate that exists but is not a socket is the interesting case (docker creates
+// a directory at a bind-mount source that is missing on the host), so it is reported over
+// plain absences.
+func firstSocket(candidates []string) (path, reason string) {
+	var absent []string
+	for _, p := range candidates {
+		fi, err := os.Stat(p)
+		switch {
+		case err != nil:
+			absent = append(absent, p)
+		case fi.Mode()&os.ModeSocket != 0:
+			return p, ""
+		case reason != "": // the first finding is the one worth reporting
+		case fi.IsDir():
+			reason = p + " is a directory, not a socket: the engine socket was not bind-mounted from the host (set CONTAINER_SOCKET to the host's docker/podman socket and recreate the orchestrator)"
+		default:
+			reason = p + " is not a unix socket"
 		}
 	}
-	if _, err := exec.LookPath("podman"); err == nil {
-		return &cliRuntime{bin: "podman"}
+	if reason == "" {
+		reason = "no engine socket at " + strings.Join(absent, ", ")
 	}
-	if _, err := exec.LookPath("docker"); err == nil {
-		return &cliRuntime{bin: "docker"}
+	return "", reason
+}
+
+// cliOrder prefers the engine the user asked for (RUNTIME=docker|podman, the Makefiles'
+// variable); otherwise podman first, matching the Makefiles' own detection.
+func cliOrder(runtime string) []string {
+	if runtime == "docker" {
+		return []string{"docker", "podman"}
 	}
-	return &noRuntime{}
+	return []string{"podman", "docker"}
+}
+
+func newSocketRuntime(path string) *socketRuntime {
+	return &socketRuntime{path: path, http: &http.Client{Transport: &http.Transport{
+		DialContext: func(ctx context.Context, _, _ string) (net.Conn, error) {
+			return (&net.Dialer{}).DialContext(ctx, "unix", path)
+		}}, Timeout: 60 * time.Second}}
 }
 
 // ---- Docker-compatible API over a unix socket -------------------------------------------
@@ -105,7 +168,7 @@ func (r *socketRuntime) do(ctx context.Context, method, path string, body any) (
 		}
 		rd = bytes.NewReader(b)
 	}
-	req, err := http.NewRequestWithContext(ctx, method, "http://d/v1.41"+path, rd)
+	req, err := http.NewRequestWithContext(ctx, method, apiBase+path, rd)
 	if err != nil {
 		return nil, err
 	}
@@ -216,7 +279,7 @@ func maxBytes(opt LogOptions) int {
 // streams oldest-first, so hitting the ceiling loses the NEWEST lines — which is why the
 // caller must not advance its cursor past what it actually parsed.
 func (r *socketRuntime) getLimited(ctx context.Context, path string, max int) ([]byte, bool, error) {
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, "http://d/v1.41"+path, nil)
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, apiBase+path, nil)
 	if err != nil {
 		return nil, false, err
 	}
@@ -370,23 +433,42 @@ func (r *cliRuntime) Networks(ctx context.Context, c string) ([]string, error) {
 	return strings.Fields(out), nil
 }
 
-type noRuntime struct{}
+// ---- no runtime -------------------------------------------------------------------------
 
 // ErrNoRuntime is returned by every operation when no container engine could be found.
 // Callers match it with errors.Is to report the cause precisely rather than by string.
-var ErrNoRuntime = errors.New("no container runtime available (mount the podman socket or install podman)")
+var ErrNoRuntime = errors.New("no container runtime available (bind-mount the engine's API socket at /var/run/docker.sock, or run where docker or podman is installed)")
 
-var errNoRuntime = ErrNoRuntime
+// noRuntime stands in when neither a socket nor a CLI was found; reason says what was
+// checked, for the startup log and the UI.
+type noRuntime struct{ reason string }
 
-func (noRuntime) Kind() string                                                 { return "none" }
-func (noRuntime) NetworkDisconnect(context.Context, string, string) error      { return errNoRuntime }
-func (noRuntime) NetworkConnect(context.Context, string, string, string) error { return errNoRuntime }
-func (noRuntime) Pause(context.Context, string) error                          { return errNoRuntime }
-func (noRuntime) Unpause(context.Context, string) error                        { return errNoRuntime }
-func (noRuntime) Stop(context.Context, string) error                           { return errNoRuntime }
-func (noRuntime) Start(context.Context, string) error                          { return errNoRuntime }
-func (noRuntime) State(context.Context, string) (string, error)                { return "", errNoRuntime }
-func (noRuntime) Networks(context.Context, string) ([]string, error)           { return nil, errNoRuntime }
-func (noRuntime) Logs(context.Context, string, LogOptions) (LogResult, error) {
-	return LogResult{}, errNoRuntime
+func (r noRuntime) err() error {
+	if r.reason == "" {
+		return ErrNoRuntime
+	}
+	return fmt.Errorf("%w: %s", ErrNoRuntime, r.reason)
+}
+
+// Kind is exactly "none": the API branches on that value.
+func (noRuntime) Kind() string                                                   { return "none" }
+func (r noRuntime) Reason() string                                               { return r.reason }
+func (r noRuntime) NetworkDisconnect(context.Context, string, string) error      { return r.err() }
+func (r noRuntime) NetworkConnect(context.Context, string, string, string) error { return r.err() }
+func (r noRuntime) Pause(context.Context, string) error                          { return r.err() }
+func (r noRuntime) Unpause(context.Context, string) error                        { return r.err() }
+func (r noRuntime) Stop(context.Context, string) error                           { return r.err() }
+func (r noRuntime) Start(context.Context, string) error                          { return r.err() }
+func (r noRuntime) State(context.Context, string) (string, error)                { return "", r.err() }
+func (r noRuntime) Networks(context.Context, string) ([]string, error)           { return nil, r.err() }
+func (r noRuntime) Logs(context.Context, string, LogOptions) (LogResult, error) {
+	return LogResult{}, r.err()
+}
+
+// Reason says why rt found no engine; "" for a working runtime.
+func Reason(rt Runtime) string {
+	if r, ok := rt.(interface{ Reason() string }); ok {
+		return r.Reason()
+	}
+	return ""
 }

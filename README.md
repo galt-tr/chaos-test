@@ -23,13 +23,18 @@ egress-free networks.
 ## Quick start
 
 ```bash
-systemctl --user enable --now podman.socket   # chaos actions (partitions, pause, stop) use the container API
+systemctl --user enable --now podman.socket   # podman only: chaos actions and logs use the engine's API socket (docker: nothing to do)
 make build           # tools image, alert-system image, walletd image, teranode (first time 10-20 min)
 make gen N=3 SV=2    # bsv-regtest/compose.yaml + bsv-regtest/config (keys created once); SV=0 for teranodes only
 make up && make wait # teranodes, SV nodes + alert sidecars, kafka, hub, arcade, merkle-service, wallet, tools
 make sim-build && make sim-up         # orchestrator + GUI
 open http://localhost:8600            # GUI (or `cd sim/ui && npm run dev` for live UI dev on :5173)
 ```
+
+`make` picks podman if installed, otherwise docker (`make RUNTIME=docker …`). `make sim-up`
+bind-mounts the engine's API socket into the orchestrator: on Docker `/var/run/docker.sock` (or
+`DOCKER_HOST`'s unix path, for rootless Docker), on Podman the socket `podman info` reports.
+Override with `CONTAINER_SOCKET=/path/to/socket make sim-up`.
 
 `make up` re-renders the compose file first, so a `make gen` setting (`N`, `SV`, `INTERNAL`,
 `TERANODE_TAG`) given to `make up` takes effect. Run an example scenario from the Scenarios page,

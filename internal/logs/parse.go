@@ -6,8 +6,10 @@
 //	<RFC3339 UTC> | <LEVEL padded to 5> | <file:line> | <service> | <message>
 //
 // and when the container runtime is asked for timestamps each line is additionally
-// prefixed with the runtime's own clock, e.g.
+// prefixed with the runtime's own clock (docker in UTC with a Z, podman with the local
+// offset), e.g.
 //
+//	2026-09-17T15:27:41.709533000Z      2026-09-17T15:27:41Z | INFO  | rpc/…:1392 | rpc | …
 //	2026-09-17T11:27:41.709533000-04:00 2026-09-17T15:27:41Z | INFO  | rpc/…:1392 | rpc | …
 //
 // The two clocks matter: the runtime's is nanosecond-precision and is what the `since`
@@ -133,8 +135,8 @@ func (l *Line) joined() string {
 	return l.Msg + "\n" + strings.Join(l.Cont, "\n")
 }
 
-// splitRuntimeStamp peels the container runtime's timestamp prefix. Podman emits it with a
-// local UTC offset (…-04:00), not a Z, so RFC3339Nano is the only safe layout.
+// splitRuntimeStamp peels the container runtime's timestamp prefix. Docker emits it in UTC
+// with a Z, podman with the local offset (…-04:00); RFC3339Nano parses both.
 func splitRuntimeStamp(text string) (time.Time, string) {
 	i := strings.IndexByte(text, ' ')
 	if i <= 0 {

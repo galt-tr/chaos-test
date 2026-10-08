@@ -10,8 +10,13 @@ make sim-up        # joins bsv-regtest_chaosnet/alertnet/ctlnet; API + UI on htt
 make sim-logs
 ```
 
-Requirements: the stack is up (`make up`) and `systemctl --user enable --now podman.socket`
-(the orchestrator mounts `$XDG_RUNTIME_DIR/podman/podman.sock` for partitions/pause/stop).
+Requirements: the stack is up (`make up`) and the engine's API socket is reachable. The
+orchestrator bind-mounts it at `/var/run/docker.sock` for partitions, pause/stop and container
+logs; `make sim-up` resolves the host path (`CONTAINER_SOCKET`): on Docker `/var/run/docker.sock`,
+or `DOCKER_HOST`'s unix path for rootless Docker; on Podman the socket `podman info` reports, which
+exists once `systemctl --user enable --now podman.socket` has run. Running `podman compose up`
+without make needs `CONTAINER_SOCKET` set by hand. Docker Desktop users should leave `DOCKER_HOST`
+unset: its `~/.docker/run/docker.sock` path cannot be bind-mounted, `/var/run/docker.sock` can.
 
 ## Pieces
 
@@ -33,10 +38,11 @@ Requirements: the stack is up (`make up`) and `systemctl --user enable --now pod
   params, roles), auto/step runs, polled assertions, `should` → findings, automatic healing of
   partitions the run opened, run records in `sim/.data/runs/`. `mark` records an event id and
   a timestamp; `event`/`no_event` take `since: "${m.eventId}"`, `log_count` (a regexp over a
-  node's container logs, via the podman socket) takes `since: "${m.at}"` — the only way to see
+  node's container logs, via the engine socket) takes `since: "${m.at}"` — the only way to see
   behaviour a node never publishes, such as upstream main's block re-validation loop.
-- `internal/chaos` — Docker-compatible API over the podman socket (network connect/disconnect
-  with pinned IP, pause/unpause, stop/start), serialised and verified.
+- `internal/chaos` — Docker Engine API over the mounted engine socket (docker or podman;
+  unversioned, so every engine release answers): network connect/disconnect with pinned IP,
+  pause/unpause, stop/start, serialised and verified. Falls back to the docker/podman CLI on the host.
 - `sim/ui` — React + TypeScript + Vite. Dev: `npm run dev` on http://127.0.0.1:5173 proxying
   `/api` to :8600. Build: `npm run build` → `internal/api/uidist` (embedded).
 

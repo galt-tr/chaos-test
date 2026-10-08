@@ -39,7 +39,11 @@ export function LogsPage() {
   const prevFilter = useRef<Filter[]>([]);
   const panes = useRef<Record<string, HTMLDivElement | null>>({});
 
-  const logsAvailable = (snapshot as unknown as { logs?: { available: boolean; reason?: string } })?.logs?.available ?? true;
+  // While the orchestrator has no engine socket every log request fails with reason
+  // `no_runtime` and an error that says why (e.g. a directory where docker should have mounted
+  // the socket). The banner below is driven by that; polling continues, so the page recovers by
+  // itself once the orchestrator is recreated with a working mount.
+  const noRuntime = Object.values(errs).find((e) => e.reason === 'no_runtime');
 
   // Deep link from the Diagnostics page: #/logs?a=teranode2&level=WARN&svc=bval,p2p
   const seeded = useRef(false);
@@ -113,12 +117,12 @@ export function LogsPage() {
 
   // Polling continues while paused so the "+N new" count is honest and resuming is instant.
   useEffect(() => {
-    if (!visible || active.length === 0 || !logsAvailable) return;
+    if (!visible || active.length === 0) return;
     void load();
     const ms = paused ? 5000 : 1500;
     const t = setInterval(() => { void load(); }, ms);
     return () => clearInterval(t);
-  }, [load, paused, visible, active.length, logsAvailable]);
+  }, [load, paused, visible, active.length]);
 
   const setFollowing = (v: boolean) => { followRef.current = v; setFollow(v); };
 
@@ -141,16 +145,20 @@ export function LogsPage() {
 
   if (!snapshot) return <div className="panel"><h2>Logs</h2><Empty>waiting for snapshot…</Empty></div>;
 
-  if (!logsAvailable) {
+  if (noRuntime) {
     return (
       <div className="panel">
         <h2>Logs</h2>
         <div className="finding">
-          <b>Container logs need the podman socket.</b>
+          <b>Container logs need the container engine's API socket.</b>
           <div className="small" style={{ marginTop: 6 }}>
-            The orchestrator reports runtime <code>none</code>, so it cannot read container logs. Run{' '}
-            <code>systemctl --user enable --now podman.socket</code> and recreate the orchestrator with{' '}
-            <code>make sim-up</code>.
+            The orchestrator reports runtime <code>none</code>: <code>{noRuntime.error}</code>
+          </div>
+          <div className="small" style={{ marginTop: 6 }}>
+            The engine socket must be bind-mounted at <code>/var/run/docker.sock</code> (docker: the
+            default; podman: <code>systemctl --user enable --now podman.socket</code>, then{' '}
+            <code>make sim-up</code> resolves it). Recreate the orchestrator with <code>make sim-up</code>;
+            this page picks the logs up by itself.
           </div>
         </div>
       </div>

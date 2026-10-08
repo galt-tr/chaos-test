@@ -316,6 +316,9 @@ func (s *Server) getState(w http.ResponseWriter, _ *http.Request) {
 	logsInfo := map[string]any{"available": kind != "none", "runtime": kind}
 	if kind == "none" {
 		logsInfo["reason"] = reasonNoRuntime
+		if d := chaos.Reason(s.d.Runtime); d != "" {
+			logsInfo["detail"] = d
+		}
 	}
 	writeJSON(w, 200, map[string]any{
 		"snapshot":  snap,

@@ -3,7 +3,8 @@
 //
 // Flags/env: -inventory (INVENTORY), -listen (LISTEN, :8600), -keys (KEYS, keys.json for the
 // alert genesis keys and identities), -data (DATA dir: alert log, keyring), -kafka (KAFKA_BROKERS,
-// empty = no verdict stream), -socket (DOCKER_HOST / podman socket for chaos), -host-mode
+// empty = no verdict stream), -socket (CONTAINER_SOCKET / DOCKER_HOST: the docker or podman socket for
+// chaos and container logs), -host-mode
 // (use host-published URLs; disables alert probing/push and Kafka).
 package main
 
@@ -67,7 +68,7 @@ func main() {
 	dataDir := flag.String("data", env("DATA", "sim/.data"), "data directory (alert log, keyring, runs)")
 	listen := flag.String("listen", env("LISTEN", ":8600"), "listen address")
 	kafka := flag.String("kafka", env("KAFKA_BROKERS", ""), "kafka brokers for verdict topics (empty = off)")
-	socket := flag.String("socket", env("PODMAN_SOCKET", ""), "container runtime socket (default: auto)")
+	socket := flag.String("socket", env("CONTAINER_SOCKET", env("PODMAN_SOCKET", "")), "docker or podman API socket (default: DOCKER_HOST, then the well-known paths)")
 	autoMine := flag.Int("automine-seconds", envInt("AUTOMINE_SECONDS", 600), "auto-mine a block every N seconds (0 = off)")
 	walletd := flag.String("walletd", env("WALLETD_URL", "http://10.190.0.52:8700"), "walletd sidecar URL (empty = wallet feature off)")
 	hostMode := flag.Bool("host-mode", env("HOST_MODE", "") == "1", "use host-published URLs (dev on the host)")
@@ -146,6 +147,9 @@ func run(ctx context.Context, lg *slog.Logger, invPath, keysPath, dataDir, liste
 
 	rt := chaos.New(socket)
 	lg.Info("container runtime", "kind", rt.Kind())
+	if r := chaos.Reason(rt); r != "" {
+		lg.Warn("no container runtime: chaos actions and container logs are off", "reason", r)
+	}
 
 	arcadeURL := ""
 	if s, ok := inv.Services["arcade"]; ok {

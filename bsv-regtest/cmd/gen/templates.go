@@ -133,6 +133,15 @@ services:
       timeout: 3s
       retries: 60
     mem_limit: ${TERANODE_MEM_LIMIT:-3g}
+    # teranode logs at DEBUG and is very chatty. The default journald driver makes 'logs --tail'
+    # scan the whole journal, which times out the orchestrator's log reader (the Logs page then
+    # shows nothing for teranodes). A file-based driver tails from the end of a size-capped file,
+    # so reads stay fast and on-disk logs stay bounded.
+    logging:
+      driver: ${LOG_DRIVER:-json-file}
+      options:
+        max-size: "50m"
+        max-file: "3"
 {{ end }}{{ range .SVNodes }}
   {{ .Name }}:
     # Bitcoin SV Node following the teranodes over the legacy (Bitcoin wire) protocol. It syncs
@@ -159,6 +168,12 @@ services:
       timeout: 5s
       retries: 60
     mem_limit: ${SVNODE_MEM_LIMIT:-2g}
+    # file-based log driver with rotation, for parity with the teranodes (see the note there).
+    logging:
+      driver: ${LOG_DRIVER:-json-file}
+      options:
+        max-size: "50m"
+        max-file: "3"
     # bitcoind's Boost scheduler dies (pthread_cond_timedwait EINVAL) after a host suspend or
     # clock jump; nothing is lost, it just needs restarting.
     restart: on-failure

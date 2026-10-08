@@ -1,6 +1,11 @@
 # Simulator layer: attaches to a running bsv-regtest network (../bsv-regtest) via its networks and inventory.
-#   cd sim && podman compose up -d --build     →  http://localhost:8600
-# Chaos actions need the podman socket: systemctl --user enable --now podman.socket
+#   make sim-build && make sim-up     →  http://localhost:8600
+# Chaos actions (partitions, pause, stop) and container logs go through the engine's API socket,
+# bind-mounted at /var/run/docker.sock. CONTAINER_SOCKET is its path on the host:
+#   docker: nothing to set (/var/run/docker.sock; rootless docker: make sim-up reads DOCKER_HOST)
+#   podman: make sim-up resolves it from `podman info`. Without make, set it yourself:
+#           CONTAINER_SOCKET=$(podman info --format '{{.Host.RemoteSocket.Path}}') podman compose up -d
+#           (the socket exists once: systemctl --user enable --now podman.socket)
 x-podman:
   in_pod: false
 
@@ -36,7 +41,7 @@ services:
       - ../bsv-regtest/config:/config:ro,Z
       - ${SCENARIOS_DIR:-../examples/scenarios}:/scenarios:ro,Z
       - ./.data:/data:Z
-      - ${XDG_RUNTIME_DIR}/podman/podman.sock:/var/run/docker.sock
+      - ${CONTAINER_SOCKET:-/var/run/docker.sock}:/var/run/docker.sock
     security_opt:
       - label=disable
     ports:

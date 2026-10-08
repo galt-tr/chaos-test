@@ -88,7 +88,7 @@ export function PartitionToggle({ n, status, run, plane }: ActionProps & { plane
   return (
     <>
       <button className={cut ? '' : 'danger'} onClick={toggle} disabled={st?.busy}
-        title={cut ? `reconnect ${target} to ${net} with its pinned IP` : `disconnect ${target} from ${net} (podman network disconnect)`}>
+        title={cut ? `reconnect ${target} to ${net} with its pinned IP` : `disconnect ${target} from ${net}`}>
         {cut ? `heal ${plane}` : `cut ${plane === 'alert' && isSV(n) ? 'sidecar alert' : plane}`}
       </button>
       <Status st={st} />

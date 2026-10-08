@@ -23,7 +23,7 @@ func (f *fakeLog) add(at time.Time, text string) {
 func (f *fakeLog) render(from int) string {
 	var b strings.Builder
 	for i := from; i < len(f.text); i++ {
-		// Podman prefixes its own clock, with a local offset rather than a Z.
+		// The runtime prefixes its own clock: docker in UTC with a Z, podman with a local offset.
 		b.WriteString(f.at[i].Format(time.RFC3339Nano) + " " + f.text[i] + "\n")
 	}
 	return b.String()
@@ -310,3 +310,25 @@ func TestBadRegexRejected(t *testing.T) {
 }
 
 func ptr(l Line) *Line { return &l }
+
+// The runtime prefixes each line with its own clock: docker in UTC with a Z, podman with the
+// local offset. Both must parse to the same instant, which is the ordering key.
+func TestRuntimeStampDockerAndPodman(t *testing.T) {
+	want := time.Date(2026, 9, 17, 15, 27, 41, 709533000, time.UTC)
+	body := app(want, "INFO", "rpc/h.go:1", "rpc", "hello")
+	for _, c := range []struct{ name, prefix string }{
+		{"docker", "2026-09-17T15:27:41.709533000Z"},
+		{"podman", "2026-09-17T11:27:41.709533000-04:00"},
+	} {
+		lines, n := Scan(c.prefix+" "+body+"\n", ScanOptions{})
+		if n != 1 || len(lines) != 1 {
+			t.Fatalf("%s: got %d lines (%d raw), want 1", c.name, len(lines), n)
+		}
+		if !lines[0].Time().Equal(want) || lines[0].At == "" {
+			t.Fatalf("%s: at=%q (%v), want %v", c.name, lines[0].At, lines[0].Time(), want)
+		}
+		if lines[0].Level != "INFO" || lines[0].Msg != "hello" {
+			t.Fatalf("%s: parsed %+v", c.name, lines[0])
+		}
+	}
+}

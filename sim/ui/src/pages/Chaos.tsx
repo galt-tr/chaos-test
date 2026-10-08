@@ -55,7 +55,7 @@ function NodeChaos({ n, status, run }: { n: NodeState; status: Runner['status'];
       <div className="small muted" style={{ marginTop: 4 }}>height {n.height} · <Tip hash={n.tip} n={8} /> · mempool {n.mempoolCount} · alert #{n.alertSeq < 0 ? 'n/a' : n.alertSeq}{sv ? ' (sidecar)' : ''} · <code>{n.container}</code>{sv && n.sidecarContainer ? <> + <code>{n.sidecarContainer}</code></> : null}</div>
 
       <fieldset>
-        <legend>network partitions (podman network disconnect/connect)</legend>
+        <legend>network partitions (compose network disconnect/connect)</legend>
         <div className="row">
           <span style={{ minWidth: 90 }}>{sv ? 'sidecar alert plane' : 'alert plane'}</span>
           {alertCut
