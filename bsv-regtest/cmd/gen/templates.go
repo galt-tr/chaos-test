@@ -361,22 +361,21 @@ asset_httpHeavyRateLimit=10000
 startAlert=true
 {{ if .LegacyEnabled }}# legacy (Bitcoin wire protocol) service on chaosnet so the SV nodes can follow the chain.
 # The SV nodes dial in (-connect); allowSyncCandidateFromLocalPeers lets non-localhost peers
-# be sync candidates on regtest. legacy_advertiseFullNode makes the service announce
-# NODE_NETWORK from the start - SV Node only syncs from full nodes, and otherwise teranode
-# announces NODE_NETWORK_LIMITED forever so the SV nodes never begin initial block download.
+# be sync candidates on regtest.
 #
-# CAVEAT: legacy_advertiseFullNode is only honoured by teranode builds that carry the
-# legacy-bridge fix (teranode PR #1912, not yet merged upstream). On a stock teranode image the
-# setting is ignored, so the SV nodes stay in sync-candidate limbo and will NOT follow the
-# teranode chain. Leave it set: it is a harmless no-op until that fix ships, then starts working
-# with no config change. The SV nodes still come up and can be mined on directly for fork tests.
+# SV Node syncs only from peers advertising NODE_NETWORK. Teranode's legacy service advertises
+# it when the block persister has stored a block within the retention window of the tip, and
+# NODE_NETWORK_LIMITED otherwise, so the block persister runs whenever SV nodes are present.
+# The legacy service decides this once, at start-up: on an empty chain nothing is persisted yet
+# and it starts limited. make wait (scripts/sv-follow.sh) then mines block 1, waits for the
+# persisters to store it and restarts those teranodes once.
 startLegacy=true
 legacy_listen_addresses=0.0.0.0:18444
 legacy_allowSyncCandidateFromLocalPeers=true
-legacy_advertiseFullNode=true
+startBlockPersister=true
 {{ else }}startLegacy=false
-{{ end }}startBlockPersister=false
-startCoinbase=false
+startBlockPersister=false
+{{ end }}startCoinbase=false
 startFaucet=false
 minminingtxfee=0
 tracing_enabled=false

@@ -1,7 +1,7 @@
 # Building the teranode image
 
 Teranode is built from source so you can build any ref, and optionally apply local patches on
-top of it (for example the legacy-bridge fix that lets the SV nodes follow the chain).
+top of it (for example an upstream fix that is not merged yet).
 `make build-teranode` does everything:
 
 1. clones `TERANODE_REPO` at `TERANODE_REF` into `upstream/teranode` (shallow), or, if the
@@ -21,7 +21,7 @@ top of it (for example the legacy-bridge fix that lets the SV nodes follow the c
 | `TERANODE_REF` | `main` | branch, tag or commit to build |
 | `TERANODE_TAG` | the ref with `/` replaced by `-` | image tag; `make gen` writes `localhost/bsv-regtest/teranode:$(TERANODE_TAG)` into `compose.yaml`, so pass the same value to both |
 | `TERANODE_REPO` | `https://github.com/bsv-blockchain/teranode` | |
-| `EXTRA_PATCHES` | empty | a second directory of `*.patch` files to apply, e.g. a local copy of the legacy-bridge fix |
+| `EXTRA_PATCHES` | empty | a second directory of `*.patch` files to apply, e.g. a local copy of an unmerged fix |
 
 ```bash
 make build-teranode                                   # main
@@ -51,13 +51,13 @@ published image can and cannot do in this network:
   current teranode, so a recent published image joins the private alert network. An older image
   ignores them and its alert service never bootstraps; freeze it through the admin RPC instead
   (`scripts/rpc.sh N freeze …`).
-- A stock teranode build advertises NODE_NETWORK_LIMITED over its legacy service on regtest (the
-  block persister is off), so the SV nodes do not sync from it; they still come up and can be
-  mined on directly. Building teranode with the legacy-bridge fix applied (an `EXTRA_PATCHES`
-  directory containing it) makes the legacy service advertise NODE_NETWORK, and the SV nodes then
-  follow the teranode chain.
-- Egress-free networks (`INTERNAL=1`) combined with the legacy service also need that fix: a stock
-  legacy service fails at startup when the container has no default route.
+- A stock teranode build serves the SV nodes. Its legacy service advertises NODE_NETWORK once the
+  block persister (on whenever SV nodes are present) has stored a block, deciding at start-up, so
+  `make wait` restarts the teranodes once on a fresh chain (see the README's SV Nodes section).
+  Checked with `ghcr.io/bsv-blockchain/teranode:v0.16.0` and SV Node 1.2.3.
+- Egress-free networks (`INTERNAL=1`) combined with the legacy service need a patched teranode
+  build (`EXTRA_PATCHES`): a stock legacy service fails at startup when the container has no
+  default route.
 
 ## The other images
 

@@ -3,13 +3,12 @@
 STACK          := bsv-regtest
 # teranode is built from source at TERANODE_REF (a branch, tag, or PR ref). EXTRA_PATCHES may
 # point at a directory of *.patch files to apply on top of that checkout - e.g. a local copy of
-# the legacy-bridge fix that lets the SV nodes follow the teranode chain (see the README). Empty
-# by default, so the default build is vanilla upstream teranode.
+# an unmerged upstream fix. Empty by default, so the default build is vanilla upstream teranode.
 TERANODE_REF   ?= main
 TERANODE_TAG   ?= $(subst /,-,$(TERANODE_REF))
 EXTRA_PATCHES  ?=
 # INTERNAL=1 renders egress-free compose networks; left open by default. Egress-free networks
-# together with the legacy bridge also need a teranode build carrying the legacy-bridge fix.
+# together with the legacy service need a patched teranode build (bsv-regtest/docs/building-teranode.md).
 INTERNAL       ?=
 STACK_VARS      = TERANODE_REF=$(TERANODE_REF) TERANODE_TAG=$(TERANODE_TAG) INTERNAL=$(INTERNAL) EXTRA_PATCHES=$(EXTRA_PATCHES) RUNTIME=$(RUNTIME)
 RUNTIME        ?= $(shell command -v podman >/dev/null 2>&1 && echo podman || echo docker)

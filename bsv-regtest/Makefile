@@ -6,7 +6,7 @@ SV             ?= 2
 SVNODE_IMAGE   ?= docker.io/bitcoinsv/bitcoin-sv:1.2.2
 # teranode is built from source at TERANODE_REF. patches/teranode is empty by default (vanilla
 # build); drop *.patch files there, or point EXTRA_PATCHES at another directory of patches, to
-# build teranode with a local fix applied (e.g. the legacy-bridge PR - see the README).
+# build teranode with a local fix applied (see docs/building-teranode.md).
 TERANODE_REF   ?= main
 TERANODE_TAG   ?= $(subst /,-,$(TERANODE_REF))
 TERANODE_REPO  ?= https://github.com/bsv-blockchain/teranode
@@ -69,7 +69,7 @@ down: ## stop and remove the network (keeps .data/)
 clean: down ## also wipe chain/alert state (through a container: the files belong to other uids)
 	@if [ -d .data ]; then $(RUNTIME) run --rm -v $(CURDIR)/.data:/d:Z $(BUSYBOX_IMAGE) sh -c 'rm -rf /d/* /d/.[!.]*' && rmdir .data; fi
 
-wait: ## wait until every node answers (teranode health port, SV node RPC, then sidecar health best-effort)
+wait: ## wait until every node answers (teranode health port, SV node RPC), the SV nodes follow the teranodes, then sidecar health best-effort
 	@# Bounded, and loud on failure: a container that exits at startup used to leave these
 	@# loops spinning forever with no output, which looks identical to a slow boot.
 	@for n in $$(seq 1 $(N)); do port=$$((20000 + (n-1)*2000)); i=0; \
@@ -84,6 +84,8 @@ wait: ## wait until every node answers (teranode health port, SV node RPC, then 
 	      $(RUNTIME) ps -a --filter name=$(PROJECT)-svnode$$j --format '  {{.Names}}  {{.Status}}'; \
 	      echo "  last logs:"; $(RUNTIME) logs --tail 5 $(PROJECT)-svnode$$j 2>&1 | sed 's/^/    /'; exit 1; fi; \
 	    sleep 2; done; echo "svnode$$j healthy"; done
+	@# on a fresh chain this mines block 1 and restarts the teranodes once (see the script)
+	@PROJECT=$(PROJECT) scripts/sv-follow.sh $(N) $(SV)
 	@for j in $$(seq 1 $(SV)); do port=$$((40000 + (j-1)*1000 + 300)); i=0; \
 	  until curl -sf --max-time 2 http://localhost:$$port/health >/dev/null 2>&1 || [ $$i -ge 45 ]; do sleep 2; i=$$((i+1)); done; \
 	  if [ $$i -ge 45 ]; then echo "alert-svnode$$j: API not up yet (it starts after 2 alert peers connect)"; else echo "alert-svnode$$j up"; fi; done

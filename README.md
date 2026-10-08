@@ -109,15 +109,16 @@ rm bsv-regtest/.env && make reset                                               
 network) and reports *how* a node rejects the offending block, which is where builds tend to
 differ.
 
-## SV Node following (caveat)
+## SV Node following
 
-The SV Nodes follow the teranode chain over teranode's legacy (Bitcoin-wire) service. Initial
-block download from teranode needs teranode to advertise `NODE_NETWORK`, which upstream teranode
-does not yet do on regtest without the legacy-bridge fix. Until that fix is in your teranode
-build, the SV Nodes come up and are fully usable as **independent miners** (mine on them directly
-to create forks, as several scenarios do), but they will not automatically sync the teranode
-chain. See [`bsv-regtest/README.md`](bsv-regtest/README.md) for how to apply the fix with
-`EXTRA_PATCHES`.
+The SV Nodes follow the teranode chain over teranode's legacy (Bitcoin-wire) service. SV Node
+syncs only from peers advertising `NODE_NETWORK`, which teranode's legacy service does when its
+block persister has stored a block, and it decides that once, at start-up. The generator
+therefore runs the block persister whenever SV Nodes are present, and on a fresh chain
+`make wait` mines block 1 and restarts the teranodes once so they come back advertising
+`NODE_NETWORK` (`make reset` goes through the same step). This works with a stock teranode build;
+no patches needed. The SV Nodes can still be mined on directly to create forks, as several
+scenarios do. Details: [`bsv-regtest/README.md`](bsv-regtest/README.md#sv-nodes).
 
 ## Layout
 
