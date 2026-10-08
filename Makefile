@@ -1,13 +1,16 @@
 # chaos-test: the harness that drives bsv-regtest (the network lives in ./bsv-regtest and has
 # its own Makefile; the stack targets below delegate to it with chaos-test's defaults).
 STACK          := bsv-regtest
-# chaos-test builds the teranode PR under test; bsv-regtest on its own defaults to main.
-TERANODE_REF   ?= fix/1422-height-anchored-freeze
-TERANODE_TAG   ?= pr1764
-# patches the PR branch needs on top of bsv-regtest's own (0001 is already in teranode main)
-EXTRA_PATCHES  ?= $(CURDIR)/patches/teranode
-# the harness keeps the network egress-free (verified on podman); bsv-regtest alone defaults to open
-INTERNAL       ?= 1
+# teranode is built from source at TERANODE_REF (a branch, tag, or PR ref). EXTRA_PATCHES may
+# point at a directory of *.patch files to apply on top of that checkout - e.g. a local copy of
+# the legacy-bridge fix that lets the SV nodes follow the teranode chain (see the README). Empty
+# by default, so the default build is vanilla upstream teranode.
+TERANODE_REF   ?= main
+TERANODE_TAG   ?= $(subst /,-,$(TERANODE_REF))
+EXTRA_PATCHES  ?=
+# INTERNAL=1 renders egress-free compose networks; left open by default. Egress-free networks
+# together with the legacy bridge also need a teranode build carrying the legacy-bridge fix.
+INTERNAL       ?=
 STACK_VARS      = TERANODE_REF=$(TERANODE_REF) TERANODE_TAG=$(TERANODE_TAG) INTERNAL=$(INTERNAL) EXTRA_PATCHES=$(EXTRA_PATCHES)
 RUNTIME        ?= $(shell command -v podman >/dev/null 2>&1 && echo podman || echo docker)
 COMPOSE        ?= $(RUNTIME) compose

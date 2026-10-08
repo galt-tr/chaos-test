@@ -34,7 +34,7 @@ services:
       DOCKER_HOST: unix:///var/run/docker.sock
     volumes:
       - ../bsv-regtest/config:/config:ro,Z
-      - ../scenarios:/scenarios:ro,Z
+      - ${SCENARIOS_DIR:-../examples/scenarios}:/scenarios:ro,Z
       - ./.data:/data:Z
       - ${XDG_RUNTIME_DIR}/podman/podman.sock:/var/run/docker.sock
     security_opt:

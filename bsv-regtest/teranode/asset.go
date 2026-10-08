@@ -52,6 +52,19 @@ func (c *AssetClient) TxMeta(ctx context.Context, txid string) (*TxMeta, error) 
 	return &m, nil
 }
 
+// BlockJSON fetches a block's full JSON document by hash (asset API /block/<hash>/json),
+// returned as the raw upstream bytes so callers can pass it through unchanged.
+func (c *AssetClient) BlockJSON(ctx context.Context, hash string) (json.RawMessage, error) {
+	b, status, err := c.get(ctx, "/block/"+hash+"/json")
+	if err != nil {
+		return nil, err
+	}
+	if status != http.StatusOK {
+		return nil, fmt.Errorf("block %s: HTTP %d: %s", hash, status, truncate(b))
+	}
+	return json.RawMessage(b), nil
+}
+
 // TxHex fetches a transaction's raw hex.
 func (c *AssetClient) TxHex(ctx context.Context, txid string) (string, error) {
 	b, status, err := c.get(ctx, "/tx/"+txid+"/hex")

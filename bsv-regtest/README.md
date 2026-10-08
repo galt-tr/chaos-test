@@ -7,8 +7,7 @@ mine, broadcast.
 
 What you get by default:
 
-- 3 teranodes built from source (plus two small patches, see [`docs/patches.md`](docs/patches.md)),
-  meshed over a private network;
+- 3 teranodes built from source, meshed over a private network;
 - 2 SV Nodes that follow the teranodes' chain over teranode's legacy (Bitcoin wire) service, each
   with a **go-alert-system sidecar** that applies alerts to it over RPC;
 - Redpanda (Kafka) for the teranodes; a go-alert-system **alert hub** bootstrapping a private alert
@@ -19,8 +18,8 @@ What you get by default:
   spend, submit).
 
 Everything is pinned (keys, IPs, images) and rendered from one generator; after `make build`
-nothing needs the internet. The network is also the layer under the
-[chaos-test](https://github.com/galt-tr/chaos-test) harness, which drives it with scenarios.
+nothing needs the internet. The network is also the layer under the chaos-test harness in the parent directory, which
+drives it with scenarios.
 
 License: Apache-2.0. **The keys in this repository are development keys; read
 [Security](#security-development-keys) before exposing anything.**
@@ -225,8 +224,9 @@ peers it dialed, so each node's `bitcoin.conf` (`config/svnode/`) lists every te
 stays on the teranodes. The **last** SV node is generated with `acceptnonstdoutputs=0`, so the
 fleet always contains one node with strict standard-output policy: a zero-satoshi bare
 `OP_RETURN <data>` output is dust there (`64: dust`) while every other node, teranode included,
-accepts it. Two teranode patches make this bridge work in a private network
-([`docs/patches.md`](docs/patches.md)).
+accepts it. The SV nodes follow the teranode chain over the legacy service; on a stock teranode build this
+needs the legacy-bridge fix (see [`docs/building-teranode.md`](docs/building-teranode.md)), so by
+default they come up as independent miners rather than followers.
 
 ```bash
 scripts/rpc.sh sv1 getblockchaininfo | jq '.result | {blocks, bestblockhash}'
@@ -373,15 +373,13 @@ cmd/gen               the generator (templates.go is the source of truth)
 cmd/alertctl          build/sign/push/probe alerts        cmd/stackctl   mine/spend/submit/topup
 alerts/ keys/ teranode/ topology/ wallet/    Go packages behind the CLIs (importable: github.com/bsv-blockchain/bsv-regtest/...)
 walletd/              HTTP wallet (own Go module on go-wallet-toolbox)
-patches/teranode/     0002 legacy listener without a default route, 0003 legacy_advertiseFullNode  -> docs/patches.md
 docker/               alert-system.Dockerfile, tools.Dockerfile
 scripts/              rpc.sh mine.sh tips.sh partition.sh
-docs/                 arcade.md wallet.md alerts.md networking.md building-teranode.md patches.md
+docs/                 arcade.md wallet.md alerts.md networking.md building-teranode.md
 .data/                runtime state (gitignored)          upstream/  source checkouts for image builds (gitignored)
 ```
 
-History: this network grew out of the chaos-test harness's stack; the legacy-service findings
-recorded in `docs/patches.md` came from a hand-run spike in September 2026.
+History: this network grew out of the chaos-test harness's stack.
 
 ## Security: development keys
 

@@ -52,6 +52,7 @@ export function MineControl({ n, status, run, blocks = 1, address, label = 'mine
   const title = st?.busy ? `mining on ${n.name}…`
     : !n.reachable ? `${n.name} is unreachable — cannot mine`
     : cut.length ? `mine ${blocks} block(s) on ${n.name} — it is cut from the ${cut.join(' and ')} plane, so this forks the chain`
+    : isSV(n) ? `mine ${blocks} block${blocks === 1 ? '' : 's'} on ${n.name} — it normally follows the teranodes, so this mines a competing block that forks the chain (RPC generate; the coinbase pays ${n.name}'s own miner key)`
     : `mine ${blocks} block${blocks === 1 ? '' : 's'} on ${n.name} (RPC ${address ? 'generatetoaddress' : 'generate'}; the coinbase pays ${address ? 'the address given' : `${n.name}'s own miner key`})`;
 
   const caughtUp = !!mined && n.tip?.toLowerCase() === mined.toLowerCase();
@@ -131,7 +132,7 @@ export function NodeControls({ n, status, run }: ActionProps) {
     <div style={{ marginTop: 10, borderTop: '1px solid var(--line)', paddingTop: 8 }}>
       <div className="row">
         {isSV(n)
-          ? <span className="small muted" title="SV nodes follow the teranodes over the legacy service; mine on a teranode">follower</span>
+          ? <><MineControl n={n} status={status} run={run} /><span className="small muted" style={{ marginLeft: 6 }} title="SV nodes normally follow the teranodes over the legacy service; mining here creates a competing block (fork)">follower</span></>
           : <MineControl n={n} status={status} run={run} />}
         <button className="link" onClick={() => setMore(!more)} title="network partitions and container lifecycle for this node">
           {more ? '▾ chaos' : '▸ chaos'}

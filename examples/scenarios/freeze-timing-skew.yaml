@@ -1,8 +1,8 @@
 id: freeze-timing-skew
 name: Freeze alert timing skew keeps the fleet in agreement
 description: >
-  Reproduces teranode PR #1764 / issue #1422 on real infrastructure. Node A receives a
-  height-anchored freeze alert early, node B late, node C never (the unaware miner). A block
+  A height-anchored freeze alert reaches the fleet with timing skew, on real infrastructure.
+  Node A receives it early, node B late, node C never (the unaware miner). A block
   spending the frozen coin BELOW the window must be accepted by every node; a block spending
   it INSIDE the window must be rejected cleanly by every node that holds the alert.
 requires: [regtest]
@@ -166,7 +166,7 @@ steps:
         with: { nodes: [A, B, C] }
         timeout: 45s
         should: true
-        message: "A holds the freeze but must still accept the below-window block (the #1422 fix; stronger than the PR e2e because A already policy-rejected the tx)"
+        message: "A holds the freeze but must still accept the below-window block (stronger than a simple e2e because A already policy-rejected the tx)"
       - check: no_event
         with: { kind: invalid_block, node: A }
         timeout: 20s

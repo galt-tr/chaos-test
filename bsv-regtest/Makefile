@@ -4,8 +4,9 @@ PROJECT        := bsv-regtest
 N              ?= 3
 SV             ?= 2
 SVNODE_IMAGE   ?= docker.io/bitcoinsv/bitcoin-sv:1.2.2
-# teranode is built from source at TERANODE_REF with the patches in patches/teranode applied;
-# EXTRA_PATCHES may name a second directory of patches (chaos-test uses it for its PR branch)
+# teranode is built from source at TERANODE_REF. patches/teranode is empty by default (vanilla
+# build); drop *.patch files there, or point EXTRA_PATCHES at another directory of patches, to
+# build teranode with a local fix applied (e.g. the legacy-bridge PR - see the README).
 TERANODE_REF   ?= main
 TERANODE_TAG   ?= $(subst /,-,$(TERANODE_REF))
 TERANODE_REPO  ?= https://github.com/bsv-blockchain/teranode
@@ -43,7 +44,7 @@ build-teranode: ## check out TERANODE_REF into upstream/teranode, apply the patc
 	@cd $(UPSTREAM)/teranode && for p in $(PATCH_FILES); do \
 	  if git apply --3way --check $$p 2>/dev/null; then git apply --3way $$p && echo "applied $$(basename $$p)"; \
 	  elif git apply --reverse --check $$p 2>/dev/null; then echo "already in $(TERANODE_REF): $$(basename $$p)"; \
-	  else echo "PATCH $$(basename $$p) DOES NOT APPLY to $(TERANODE_REF); rebase it (see docs/patches.md)"; exit 1; fi; done
+	  else echo "PATCH $$(basename $$p) DOES NOT APPLY to $(TERANODE_REF); rebase it against that ref"; exit 1; fi; done
 	cd $(UPSTREAM)/teranode && $(RUNTIME) build -t localhost/$(PROJECT)/teranode:$(TERANODE_TAG) \
 	  --build-arg BASE_IMG=ghcr.io/bsv-blockchain/teranode-base:build-latest \
 	  --build-arg RUN_IMG=ghcr.io/bsv-blockchain/teranode-base:run-latest \

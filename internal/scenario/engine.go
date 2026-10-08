@@ -122,7 +122,7 @@ type Engine struct {
 	defs map[string]*Definition
 	runs map[string]*Run
 	seq  int
-	dir  string // scenario directory, re-read on every list/start so edits apply live
+	dirs []string // scenario directories, re-read on every list/start so edits apply live
 }
 
 // NewEngine creates an engine.
@@ -133,41 +133,52 @@ func NewEngine(d Deps) *Engine {
 	return e
 }
 
-// LoadDir loads every *.yaml in dir and remembers dir for live reloads.
-func (e *Engine) LoadDir(dir string) error {
-	e.mu.Lock()
-	e.dir = dir
-	e.mu.Unlock()
-	entries, err := os.ReadDir(dir)
-	if err != nil {
-		return err
-	}
-	e.mu.Lock()
-	e.defs = map[string]*Definition{}
-	e.mu.Unlock()
-	for _, ent := range entries {
-		if ent.IsDir() || !(strings.HasSuffix(ent.Name(), ".yaml") || strings.HasSuffix(ent.Name(), ".yml")) {
+// LoadDirs loads every *.yaml/*.yml from each directory, remembering them for live reloads.
+// Later directories override earlier ones by scenario ID, so a user-supplied directory can add to
+// (or shadow) the bundled examples. A missing directory or an unparseable/unreadable file is logged
+// and skipped rather than failing the whole load, so one bad scenario never hides the others.
+func (e *Engine) LoadDirs(dirs ...string) error {
+	defs := map[string]*Definition{}
+	for _, dir := range dirs {
+		if dir == "" {
 			continue
 		}
-		b, err := os.ReadFile(filepath.Join(dir, ent.Name()))
+		entries, err := os.ReadDir(dir)
 		if err != nil {
-			return err
+			e.d.Logger.Warn("scenario directory not readable", "dir", dir, "err", err)
+			continue
 		}
-		var def Definition
-		if err := yaml.Unmarshal(b, &def); err != nil {
-			return fmt.Errorf("%s: %w", ent.Name(), err)
+		for _, ent := range entries {
+			if ent.IsDir() || !(strings.HasSuffix(ent.Name(), ".yaml") || strings.HasSuffix(ent.Name(), ".yml")) {
+				continue
+			}
+			b, err := os.ReadFile(filepath.Join(dir, ent.Name()))
+			if err != nil {
+				e.d.Logger.Warn("scenario file not readable", "dir", dir, "file", ent.Name(), "err", err)
+				continue
+			}
+			var def Definition
+			if err := yaml.Unmarshal(b, &def); err != nil {
+				e.d.Logger.Warn("scenario parse failed (skipped)", "dir", dir, "file", ent.Name(), "err", err)
+				continue
+			}
+			if def.ID == "" {
+				def.ID = strings.TrimSuffix(strings.TrimSuffix(ent.Name(), ".yaml"), ".yml")
+			}
+			def.Source = ent.Name()
+			defs[def.ID] = &def
+			e.d.Logger.Debug("scenario loaded", "id", def.ID, "dir", dir, "steps", len(def.Steps))
 		}
-		if def.ID == "" {
-			def.ID = strings.TrimSuffix(strings.TrimSuffix(ent.Name(), ".yaml"), ".yml")
-		}
-		def.Source = ent.Name()
-		e.mu.Lock()
-		e.defs[def.ID] = &def
-		e.mu.Unlock()
-		e.d.Logger.Debug("scenario loaded", "id", def.ID, "steps", len(def.Steps))
 	}
+	e.mu.Lock()
+	e.dirs = dirs
+	e.defs = defs
+	e.mu.Unlock()
 	return nil
 }
+
+// LoadDir loads a single scenario directory (convenience wrapper over LoadDirs).
+func (e *Engine) LoadDir(dir string) error { return e.LoadDirs(dir) }
 
 func (e *Engine) loadRuns() {
 	entries, _ := os.ReadDir(e.d.RunsDir)
@@ -203,14 +214,12 @@ func (e *Engine) save(r *Run) {
 // reload re-reads the scenario directory (ignoring errors, keeping the last good set).
 func (e *Engine) reload() {
 	e.mu.RLock()
-	dir := e.dir
+	dirs := e.dirs
 	e.mu.RUnlock()
-	if dir == "" {
+	if len(dirs) == 0 {
 		return
 	}
-	if err := e.LoadDir(dir); err != nil {
-		e.d.Logger.Warn("scenario reload failed", "err", err)
-	}
+	_ = e.LoadDirs(dirs...)
 }
 
 // Start begins a run.

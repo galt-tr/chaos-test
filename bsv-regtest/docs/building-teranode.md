@@ -1,14 +1,16 @@
 # Building the teranode image
 
-Teranode is built from source so that the two patches in `patches/teranode/` can be applied
-([`patches.md`](patches.md)). `make build-teranode` does everything:
+Teranode is built from source so you can build any ref, and optionally apply local patches on
+top of it (for example the legacy-bridge fix that lets the SV nodes follow the chain).
+`make build-teranode` does everything:
 
 1. clones `TERANODE_REPO` at `TERANODE_REF` into `upstream/teranode` (shallow), or, if the
    checkout exists, fetches the ref and resets the tree to it (`upstream/teranode` is a
    disposable build checkout: local changes are dropped);
-2. applies every `patches/teranode/*.patch` and, when `EXTRA_PATCHES` names a directory, every
-   patch in it. A patch that is already contained in the ref is reported and skipped; one that
-   does not apply stops the build with `PATCH … DOES NOT APPLY`;
+2. applies every `patches/teranode/*.patch` (empty by default, so a plain build is vanilla) and,
+   when `EXTRA_PATCHES` names a directory, every patch in it. A patch that is already contained in
+   the ref is reported and skipped; one that does not apply stops the build with
+   `PATCH … DOES NOT APPLY`;
 3. builds the image with teranode's own Dockerfile and the published base images
    (`ghcr.io/bsv-blockchain/teranode-base:build-latest` / `run-latest`) as
    `localhost/bsv-regtest/teranode:$(TERANODE_TAG)`, with `GIT_VERSION` set to
@@ -19,7 +21,7 @@ Teranode is built from source so that the two patches in `patches/teranode/` can
 | `TERANODE_REF` | `main` | branch, tag or commit to build |
 | `TERANODE_TAG` | the ref with `/` replaced by `-` | image tag; `make gen` writes `localhost/bsv-regtest/teranode:$(TERANODE_TAG)` into `compose.yaml`, so pass the same value to both |
 | `TERANODE_REPO` | `https://github.com/bsv-blockchain/teranode` | |
-| `EXTRA_PATCHES` | empty | a second patch directory (the chaos-test harness uses it for a patch its PR branch needs) |
+| `EXTRA_PATCHES` | empty | a second directory of `*.patch` files to apply, e.g. a local copy of the legacy-bridge fix |
 
 ```bash
 make build-teranode                                   # main
@@ -44,16 +46,18 @@ TERANODE_IMAGE_2=ghcr.io/bsv-blockchain/teranode:latest
 Compose pulls that image for node 2 (the teranode service has no `pull_policy: never`). What a
 published image can and cannot do in this network:
 
-- Since teranode PR 1767 (merged 2026-09-18) the alert P2P settings this network relies on
-  (`alert_p2p_bootstrap_peer`, `alert_p2p_allow_private_ips`, `alert_p2p_peer_discovery_interval`,
-  `alert_p2p_dht_mode`) are upstream, so a published image built after that date joins the
-  private alert network. An older image ignores them and its alert service never bootstraps;
-  freeze it through the admin RPC instead (`scripts/rpc.sh N freeze …`).
-- Without patch 0003 (`legacy_advertiseFullNode`) SV nodes do not sync from that node, because
-  its legacy service advertises NODE_NETWORK_LIMITED while the block persister is off. They
-  still sync from the patched nodes.
-- Without patch 0002 the legacy service fails at startup when the container has no default
-  route, i.e. with `INTERNAL=1`.
+- The alert P2P settings this network relies on (`alert_p2p_bootstrap_peer`,
+  `alert_p2p_allow_private_ips`, `alert_p2p_peer_discovery_interval`, `alert_p2p_dht_mode`) are in
+  current teranode, so a recent published image joins the private alert network. An older image
+  ignores them and its alert service never bootstraps; freeze it through the admin RPC instead
+  (`scripts/rpc.sh N freeze …`).
+- A stock teranode build advertises NODE_NETWORK_LIMITED over its legacy service on regtest (the
+  block persister is off), so the SV nodes do not sync from it; they still come up and can be
+  mined on directly. Building teranode with the legacy-bridge fix applied (an `EXTRA_PATCHES`
+  directory containing it) makes the legacy service advertise NODE_NETWORK, and the SV nodes then
+  follow the teranode chain.
+- Egress-free networks (`INTERNAL=1`) combined with the legacy service also need that fix: a stock
+  legacy service fails at startup when the container has no default route.
 
 ## The other images
 

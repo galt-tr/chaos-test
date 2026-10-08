@@ -24,7 +24,7 @@ RUN CGO_ENABLED=0 go build -trimpath -o /out/orchestrator ./cmd/orchestrator
 FROM docker.io/library/alpine:3.21
 RUN apk add --no-cache ca-certificates curl && mkdir -p /data /config /scenarios
 COPY --from=builder /out/orchestrator /usr/local/bin/orchestrator
-COPY scenarios/ /scenarios/
+COPY examples/scenarios/ /scenarios/
 ENV INVENTORY=/config/inventory.json KEYS=/config/keys.json DATA=/data SCENARIOS=/scenarios LISTEN=:8600
 EXPOSE 8600 9909
 ENTRYPOINT ["orchestrator"]

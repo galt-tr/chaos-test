@@ -44,6 +44,18 @@ func env(k, d string) string {
 	return d
 }
 
+// splitDirs turns a comma-separated scenario-directory list into a slice, trimming whitespace and
+// dropping empties, so SCENARIOS can name several directories (bundled examples plus a user's own).
+func splitDirs(list string) []string {
+	var dirs []string
+	for _, p := range strings.Split(list, ",") {
+		if p = strings.TrimSpace(p); p != "" {
+			dirs = append(dirs, p)
+		}
+	}
+	return dirs
+}
+
 type keysFile struct {
 	Genesis   []keys.Secp256k1Key  `json:"genesis"`
 	Publisher keys.Ed25519Identity `json:"publisher"`
@@ -59,7 +71,7 @@ func main() {
 	autoMine := flag.Int("automine-seconds", envInt("AUTOMINE_SECONDS", 600), "auto-mine a block every N seconds (0 = off)")
 	walletd := flag.String("walletd", env("WALLETD_URL", "http://10.190.0.52:8700"), "walletd sidecar URL (empty = wallet feature off)")
 	hostMode := flag.Bool("host-mode", env("HOST_MODE", "") == "1", "use host-published URLs (dev on the host)")
-	scenariosDir := flag.String("scenarios", env("SCENARIOS", "scenarios"), "directory of scenario YAML files")
+	scenariosDir := flag.String("scenarios", env("SCENARIOS", "examples/scenarios"), "comma-separated scenario directories; later dirs override earlier ones by scenario id, so you can load your own alongside the bundled examples (e.g. examples/scenarios,/my/scenarios)")
 	flag.Parse()
 
 	lg := slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: slog.LevelInfo}))
@@ -177,8 +189,9 @@ func run(ctx context.Context, lg *slog.Logger, invPath, keysPath, dataDir, liste
 	}
 
 	eng := scenario.NewEngine(scenario.Deps{Inventory: inv, Bus: bus, Fleet: fleet, API: srv, Logger: lg, RunsDir: filepath.Join(dataDir, "runs")})
-	if err := eng.LoadDir(scenariosDir); err != nil {
-		lg.Warn("scenarios not loaded", "dir", scenariosDir, "err", err)
+	scenarioDirs := splitDirs(scenariosDir)
+	if err := eng.LoadDirs(scenarioDirs...); err != nil {
+		lg.Warn("scenarios not loaded", "dirs", scenarioDirs, "err", err)
 	}
 	srv.SetScenarios(eng)
 

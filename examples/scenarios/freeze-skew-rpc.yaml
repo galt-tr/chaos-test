@@ -1,19 +1,19 @@
 id: freeze-skew-rpc
-name: Immediate RPC freeze on one node - rejection handling (runs on upstream main and the PR)
+name: Immediate RPC freeze on one node - rejection handling
 description: >
-  The issue #1422 shape driven over the admin `freeze` RPC, which both upstream `main` and the
-  PR #1764 image accept in its 3-parameter form (txid, vout, utxoHash). Without heights the PR
-  stores the freeze as (0, 0), "enforced at every height", i.e. the legacy immediate consensus
-  freeze - so on BOTH builds node A must reject the block that unaware node B mines spending the
-  coin, and the fleet splits by the operator's intent. What this scenario compares is HOW A
-  rejects it. Expected on the PR image (0 findings): one block-invalid verdict on Kafka naming
-  the frozen output, the block validated once, B's next block rejected immediately as the child
-  of an invalid parent, no re-fetch. Expected on upstream main (findings): no verdict at all
-  (SERVICE_ERROR only) and, once B builds on the block, a catch-up loop that re-fetches and
-  re-validates it every few seconds. Run with TERANODE_IMAGE_1=ghcr.io/bsv-blockchain/teranode:latest
-  in bsv-regtest/.env (plus `make reset`) for the baseline; that image has no alert service in the
-  private stack, which is why this scenario uses the RPC. The height-anchored behaviour itself
-  (fleet agreement below the window, clean rejection inside it) is freeze-timing-skew.
+  An immediate freeze driven over the admin `freeze` RPC in its 3-parameter form (txid, vout,
+  utxoHash). Without heights the freeze is stored as (0, 0), "enforced at every height", i.e. the
+  legacy immediate consensus freeze - so node A must reject the block that unaware node B mines
+  spending the coin, and the fleet splits by the operator's intent. What this scenario compares is
+  HOW A rejects it, which is where teranode builds differ. On a build with the height-anchored
+  freeze fix (0 findings): one block-invalid verdict on Kafka naming the frozen output, the block
+  validated once, B's next block rejected immediately as the child of an invalid parent, no
+  re-fetch. On a build without it (findings): no verdict at all (SERVICE_ERROR only) and, once B
+  builds on the block, a catch-up loop that re-fetches and re-validates it every few seconds. Pin a
+  different image for node A with TERANODE_IMAGE_1=... in bsv-regtest/.env (plus `make reset`) to
+  compare two builds; this scenario delivers the freeze over RPC so it needs no shared alert
+  network. The height-anchored behaviour itself (fleet agreement below the window, clean rejection
+  inside it) is freeze-timing-skew.
 requires: [regtest]
 roles:
   A: teranode1   # receives the freeze (over RPC; works even when its alert service is offline)
@@ -170,7 +170,7 @@ steps:
         with: { node: A, pattern: "\\[ValidateBlock\\]\\[${blockBelow.last}\\] validating block from", since: "${afterBlock.at}", max: 1 }
         timeout: 60s
         should: true
-        message: "A does not re-fetch and re-validate the rejected block when B builds on it (the issue #1422 catch-up loop: upstream main re-validated it 16 times in 75 s)"
+        message: "A does not re-fetch and re-validate the rejected block when B builds on it (a build without the fix re-validated it in a catch-up loop, 16 times in 75 s)"
       - check: event
         with: { kind: invalid_block, node: A, contains: "${extend.last}" }
         timeout: 15s

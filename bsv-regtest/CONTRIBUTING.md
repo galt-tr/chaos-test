@@ -7,9 +7,9 @@
   Go module outside the workspace).
 - If you touch the Makefile or the compose template, try both `RUNTIME=podman` and
   `RUNTIME=docker`; say in the PR which one you could actually run.
-- Patches in `patches/teranode/` must apply to `TERANODE_REF` (`make build-teranode` stops
-  loudly when one does not). Prefer upstreaming a change and note the upstream PR in
-  `docs/patches.md`.
+- `patches/teranode/` is empty by default (vanilla teranode build). Any `*.patch` you drop there,
+  or point `EXTRA_PATCHES` at, must apply to `TERANODE_REF` (`make build-teranode` stops loudly
+  when one does not). Prefer upstreaming a change over carrying a patch.
 - The keys in `config/keys.json` are regtest-only development keys. Never add real keys, and
   never point this network at a public chain.
 - Keep the README scannable: details belong under `docs/`.

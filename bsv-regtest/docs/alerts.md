@@ -86,7 +86,8 @@ The two implementations read it differently (verified on teranode `main` and SV 
   below the node's current height is treated as an *unfreeze*; anything else freezes the output
   at once, `start` ignored. The output shows `status: FROZEN` on `/api/v1/utxos/{txid}/json`,
   a spend is refused with `403 UTXO_FROZEN (72)`, and a block spending it is rejected with
-  `UTXO_CONSENSUS_FROZEN`. Upstream PR 1764 makes teranode honour the window instead.
+  `UTXO_CONSENSUS_FROZEN`. Teranode builds that support height-anchored freezes accept optional window heights and honour
+  the window instead of freezing immediately.
 - **SV Node** (via the sidecar's `addToConsensusBlacklist`): the output goes on the policy
   blacklist at once, so the mempool refuses the spend (`bad-txns-inputs-frozen`), and on the
   consensus blacklist for `[start, stop)`, where blocks spending it are rejected. With an

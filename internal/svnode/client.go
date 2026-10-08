@@ -57,6 +57,15 @@ type Block struct {
 	Tx     []string `json:"tx"`
 }
 
+// BlockJSON returns a block's full getblock JSON (verbosity 1) by hash, as raw bytes.
+func (c *Client) BlockJSON(ctx context.Context, hash string) (json.RawMessage, error) {
+	var raw json.RawMessage
+	if err := c.Call(ctx, "getblock", []any{hash, 1}, &raw); err != nil {
+		return nil, err
+	}
+	return raw, nil
+}
+
 // Block fetches a block's txids by hash.
 func (c *Client) Block(ctx context.Context, hash string) (*Block, error) {
 	var b Block

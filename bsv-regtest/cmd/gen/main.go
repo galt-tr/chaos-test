@@ -92,6 +92,7 @@ type view struct {
 	SV             int
 	SVNodes        []svView
 	SVNodeImage    string
+	ChronicleHeight int  // SV Node -chronicleactivationheight (match teranode's regtest 200)
 	LegacyEnabled  bool // teranodes run the legacy (Bitcoin wire) service so SV nodes can follow
 	Hub            topology.Hub
 	HubKey         string
@@ -121,6 +122,7 @@ func main() {
 	svImage := flag.String("svnode-image", "docker.io/bitcoinsv/bitcoin-sv:1.2.2", "default SV node image")
 	discovery := flag.String("alert-discovery-interval", "15s", "alert p2p peer discovery interval")
 	internal := flag.Bool("internal", false, "make the compose networks internal (no egress); host-published ports still work on podman, on docker only from the host itself")
+	chronicle := flag.Int("chronicle-height", 200, "SV Node Chronicle activation height (bitcoin-sv's undocumented -chronicleactivationheight); default 200 matches teranode's go-chaincfg regtest value so the splice opcodes activate at the same low height on both")
 	flag.Parse()
 	if *n < 2 || *n > 10 {
 		fmt.Fprintln(os.Stderr, "-n must be in 2..10")
@@ -130,13 +132,13 @@ func main() {
 		fmt.Fprintln(os.Stderr, "-sv must be in 0..5")
 		os.Exit(2)
 	}
-	if err := run(*n, *sv, *out, *image, *svImage, *discovery, *internal); err != nil {
+	if err := run(*n, *sv, *out, *image, *svImage, *discovery, *internal, *chronicle); err != nil {
 		fmt.Fprintln(os.Stderr, "error:", err)
 		os.Exit(1)
 	}
 }
 
-func run(n, sv int, out, image, svImage, discovery string, internal bool) error {
+func run(n, sv int, out, image, svImage, discovery string, internal bool, chronicle int) error {
 	cfgDir := filepath.Join(out, "config")
 	dirs := []string{filepath.Join(cfgDir, "teranode"), filepath.Join(cfgDir, "alert-system"), filepath.Join(out, "scripts")}
 	if sv > 0 {
@@ -152,7 +154,7 @@ func run(n, sv int, out, image, svImage, discovery string, internal bool) error 
 		return err
 	}
 
-	v := view{Project: project, Internal: internal, N: n, SV: sv, SVNodeImage: svImage, LegacyEnabled: sv > 0, TeranodeImage: image, Topic: alertTopic, Protocol: alertProtocol,
+	v := view{Project: project, Internal: internal, N: n, SV: sv, SVNodeImage: svImage, LegacyEnabled: sv > 0, TeranodeImage: image, Topic: alertTopic, Protocol: alertProtocol, ChronicleHeight: chronicle,
 		Generated: time.Now().UTC().Format(time.RFC3339), DiscoveryEvery: discovery, HubKey: kf.Hub.PrivateKeyHex, AdminAPIKey: kf.AdminAPIKey,
 		ArcadeToken: kf.ArcadeCallbackToken, WalletKey: kf.WalletServerKey.PrivateKeyHex}
 	v.Arcade = topology.Service{URL: "http://10.191.0.40:8080", HostURL: "http://localhost:18080", Container: ctr("arcade"),

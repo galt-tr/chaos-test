@@ -166,7 +166,8 @@ func (c *RPCClient) ReconsiderBlock(ctx context.Context, hash string) error {
 	return c.Call(ctx, "reconsiderblock", []any{hash}, nil)
 }
 
-// Freeze calls the admin freeze RPC (PR #1764 adds the optional window arguments).
+// Freeze calls the admin freeze RPC. start/stop are optional window heights that newer teranode
+// builds accept; without them the freeze is immediate.
 func (c *RPCClient) Freeze(ctx context.Context, txid string, vout uint32, start, stop *uint64, policyExpires bool) error {
 	params := []any{txid, vout, ""}
 	if start != nil || stop != nil {

@@ -80,8 +80,9 @@ teranode and the other SV nodes as `connect=` targets (`getpeerinfo` shows them 
 protocol and served from the announcing teranode. Chain parameters match teranode's regtest
 (go-chaincfg): `genesisactivationheight=100`; teranode's Chronicle activation at height 200
 has no SV counterpart, so keep experiments below height 200 between resets. Mining stays on
-the teranodes. Two teranode patches make the bridge work in a private network
-([`patches.md`](patches.md)).
+the teranodes. Following the teranode chain over the legacy service needs a teranode build with
+the legacy-bridge fix (see [`building-teranode.md`](building-teranode.md)); without it the SV
+nodes still come up and can be mined on directly.
 
 ## Kafka
 

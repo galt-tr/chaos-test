@@ -120,6 +120,7 @@ func New(d Deps) *Server {
 	m.HandleFunc("POST /api/tx/spend", s.postSpend)
 	m.HandleFunc("POST /api/tx/submit", s.postSubmit)
 	m.HandleFunc("GET /api/tx/{txid}", s.getTx)
+	m.HandleFunc("GET /api/block/{hash}", s.getBlock)
 	m.HandleFunc("GET /api/coinbase", s.getCoinbase)
 	m.HandleFunc("POST /api/watch", s.postWatch)
 	m.HandleFunc("DELETE /api/watch/{txid}/{vout}", s.deleteWatch)
@@ -902,6 +903,40 @@ func (s *Server) getTx(w http.ResponseWriter, r *http.Request) {
 
 // getTxSV renders the SV-node view of a transaction in the shape the UI expects from the
 // teranode path: txmeta (block heights, coinbase), utxos (per-output status) and hex.
+// getBlock returns a block's JSON by hash from the chosen node: the asset API /block/<hash>/json
+// on teranodes, getblock (verbosity 1) on SV nodes. The node's raw document is embedded under
+// "block" so a browser opening /api/block/<hash>?node=<name> sees that node's own view — which is
+// how two nodes that disagree about a block (a chainsplit) show different documents for one hash.
+func (s *Server) getBlock(w http.ResponseWriter, r *http.Request) {
+	hash := r.PathValue("hash")
+	nodeName := r.URL.Query().Get("node")
+	if nodeName == "" {
+		nodeName = s.defaultNode()
+	}
+	n, err := s.node(nodeName)
+	if err != nil {
+		writeErr(w, 404, err)
+		return
+	}
+	ctx, cancel := context.WithTimeout(r.Context(), 15*time.Second)
+	defer cancel()
+	out := map[string]any{"node": n.Name, "kind": n.Kind, "hash": hash}
+	var raw json.RawMessage
+	if sv := s.d.Fleet.SV(n.Name); sv != nil {
+		raw, err = sv.BlockJSON(ctx, hash)
+	} else if a := s.d.Fleet.Asset(n.Name); a != nil {
+		raw, err = a.BlockJSON(ctx, hash)
+	} else {
+		err = fmt.Errorf("node %s has no block API", n.Name)
+	}
+	if err != nil {
+		out["error"] = err.Error()
+	} else {
+		out["block"] = raw
+	}
+	writeJSON(w, 200, out)
+}
+
 func (s *Server) getTxSV(ctx context.Context, sv *svnode.Client, node, txid string, out map[string]any) {
 	t, err := sv.RawTransaction(ctx, txid)
 	if err != nil {

@@ -346,9 +346,15 @@ asset_httpHeavyRateLimit=10000
 startAlert=true
 {{ if .LegacyEnabled }}# legacy (Bitcoin wire protocol) service on chaosnet so the SV nodes can follow the chain.
 # The SV nodes dial in (-connect); allowSyncCandidateFromLocalPeers lets non-localhost peers
-# be sync candidates on regtest; advertiseFullNode (patch 0003) makes the service announce
-# NODE_NETWORK from the start - SV Node only syncs from full nodes, and without the block
-# persister teranode would announce NODE_NETWORK_LIMITED forever.
+# be sync candidates on regtest. legacy_advertiseFullNode makes the service announce
+# NODE_NETWORK from the start - SV Node only syncs from full nodes, and otherwise teranode
+# announces NODE_NETWORK_LIMITED forever so the SV nodes never begin initial block download.
+#
+# CAVEAT: legacy_advertiseFullNode is only honoured by teranode builds that carry the
+# legacy-bridge fix (teranode PR #1912, not yet merged upstream). On a stock teranode image the
+# setting is ignored, so the SV nodes stay in sync-candidate limbo and will NOT follow the
+# teranode chain. Leave it set: it is a harmless no-op until that fix ships, then starts working
+# with no config change. The SV nodes still come up and can be mined on directly for fork tests.
 startLegacy=true
 legacy_listen_addresses=0.0.0.0:18444
 legacy_allowSyncCandidateFromLocalPeers=true
@@ -377,13 +383,18 @@ legacy_grpcAddress=localhost:8099
 legacy_httpAddress=http://localhost:8098
 coinbase_grpcAddress=
 rpc_address=http://localhost:9292
+# teranode main fails closed when rpc_user/rpc_pass are empty (asset_requireAuthCredentials
+# defaults true; no default credential pair ships anymore). The orchestrator authenticates with
+# the inventory's bitcoin:bitcoin, so set the matching admin credentials for generate/invalidate.
+rpc_user=bitcoin
+rpc_pass=bitcoin
 # main p2p: static mesh over chaosnet only, no DHT. Bootstrap peers are set per node to the
 # same mesh, because an empty list makes go-p2p-message-bus fall back to the public IPFS
 # bootstrap peers.
 p2p_dht_mode=off
 p2p_allow_private_ips=true
 p2p_share_private_addresses=true
-# alert p2p: private network bootstrapped from the go-alert-system hub (patched settings).
+# alert p2p: private network bootstrapped from the go-alert-system hub.
 # allow_private_ips stays FALSE on purpose: alertnet (192.0.0.128/26) is classified public by
 # libp2p, so the alert hosts only advertise/accept alertnet addresses and can never reach each
 # other over chaosnet/ctlnet. That is what makes an alert-plane partition airtight.
@@ -471,13 +482,17 @@ maxstackmemoryusageconsensus=100MB
 blockmaxsize=4GB
 # teranode activates Genesis rules at height 100 on regtest (go-chaincfg); SV Node's default is 10000
 genesisactivationheight=100
+# Chronicle activates the splice opcodes (OP_SUBSTR/OP_LEFT/OP_RIGHT). bitcoin-sv's regtest default
+# is 15000; -chronicleactivationheight (undocumented, read by init.cpp) overrides it. Match teranode's
+# go-chaincfg regtest value ({{ .ChronicleHeight }}) so both activate at the same low height.
+chronicleactivationheight={{ .ChronicleHeight }}
 minminingtxfee=0.00000001
 banscore=1000000
 {{ if .StrictPolicy }}# Standard-output policy, ON for this node only; every other SV node keeps SV Node's
 # post-Genesis default of 1. After Genesis a bare "OP_RETURN <data>" output is SPENDABLE, so a
 # zero-satoshi one is dust and is rejected here with "64: dust". The provably unspendable
 # "OP_FALSE OP_RETURN <data>" form is exempt and is accepted. Teranode and arcade accept both
-# forms regardless, and scenarios/svnode-dust-policy.yaml pins that divergence down.
+# forms regardless, and examples/scenarios/svnode-dust-policy.yaml pins that divergence down.
 # Note: -dustrelayfee and -dustlimitfactor are rejected by SV Node 1.2.2 as removed options,
 # so this flag is the only lever left over the dust rule.
 acceptnonstdoutputs=0

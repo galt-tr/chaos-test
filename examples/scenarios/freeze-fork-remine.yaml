@@ -1,7 +1,7 @@
 id: freeze-fork-remine
 name: A fork re-mining the below-window spend inside the window is rejected by all alert holders
 description: >
-  The adversarial case from PR #1764's e2e test with real P2P. A and B both hold the freeze
+  The adversarial fork case, with real P2P. A and B both hold the freeze
   and both already record victim output 0 as spent by blockBelow (below the window). C,
   isolated from the peer plane, mines an empty sibling of blockBelow and then re-mines the
   same spend at windowStart. When C is healed, A and B must reject the fork block with the
