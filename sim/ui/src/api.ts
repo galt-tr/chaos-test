@@ -3,7 +3,7 @@ export type NodeState = {
   kind?: NodeKind; name: string; index: number; reachable: boolean; height: number; tip: string; fsm: string;
   peers?: number; mempoolCount: number; mempool?: string[]; alertSeq: number; alertReachable: boolean;
   alertSource?: 'node' | 'sidecar'; alertUnprocessed?: number; sidecarURL?: string; sidecarContainer?: string;
-  version?: string; container: string; partitions?: string[]; error?: string; updatedAt: string;
+  version?: string; commit?: string; container: string; partitions?: string[]; error?: string; updatedAt: string;
   /** The node's own asset dashboard (teranodes), reachable from the browser (static config). */
   hostURL?: string;
 };

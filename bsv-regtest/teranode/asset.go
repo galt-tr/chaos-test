@@ -15,6 +15,9 @@ import (
 type AssetClient struct {
 	BaseURL string // e.g. http://teranode1:8090/api/v1
 	HTTP    *http.Client
+	// User and Pass, when set, go out as basic auth on GET requests. Most of the API is open;
+	// /settings answers 401 without the node's rpc_user/rpc_pass.
+	User, Pass string
 }
 
 // NewAssetClient returns a client for the given base URL (including /api/v1).
@@ -146,6 +149,9 @@ func (c *AssetClient) get(ctx context.Context, path string) ([]byte, int, error)
 	if err != nil {
 		return nil, 0, err
 	}
+	if c.User != "" {
+		req.SetBasicAuth(c.User, c.Pass)
+	}
 	resp, err := c.HTTP.Do(req)
 	if err != nil {
 		return nil, 0, fmt.Errorf("GET %s: %w", path, err)
@@ -189,4 +195,22 @@ func (c *AssetClient) FSMState(ctx context.Context) (string, error) {
 		return "", err
 	}
 	return st.State, nil
+}
+
+// BuildInfo returns the node's build version and commit (e.g. "v0.16.0", "4edb60a40") from the
+// envelope of GET /settings; category=none filters the settings list itself down to nothing.
+// The JSON-RPC `version` call is no substitute: it reports the btcd JSON-RPC API semver
+// ("1.3.0"), the same on every teranode build. Needs User/Pass.
+func (c *AssetClient) BuildInfo(ctx context.Context) (version, commit string, err error) {
+	var env struct {
+		Version string `json:"version"`
+		Commit  string `json:"commit"`
+	}
+	if err := c.getJSON(ctx, "/settings?category=none", &env); err != nil {
+		return "", "", err
+	}
+	if env.Version == "" {
+		return "", "", fmt.Errorf("GET /settings: no version in the response")
+	}
+	return env.Version, env.Commit, nil
 }

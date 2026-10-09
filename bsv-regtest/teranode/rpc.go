@@ -119,28 +119,6 @@ func truncate(b []byte) string {
 	return string(b)
 }
 
-// Version returns the node's version string from the version RPC.
-func (c *RPCClient) Version(ctx context.Context) (string, error) {
-	var out map[string]any
-	if err := c.Call(ctx, "version", nil, &out); err != nil {
-		return "", err
-	}
-	for _, k := range []string{"version", "Version"} {
-		if v, ok := out[k]; ok {
-			return fmt.Sprint(v), nil
-		}
-	}
-	for k, v := range out {
-		if m, ok := v.(map[string]any); ok {
-			if vs, ok := m["versionstring"]; ok {
-				return fmt.Sprint(vs), nil
-			}
-			return k + ":" + fmt.Sprint(m["major"]), nil
-		}
-	}
-	return fmt.Sprint(out), nil
-}
-
 // ChainTip is one entry of getchaintips (server-cached ~5 min in teranode).
 type ChainTip struct {
 	Height    uint32 `json:"height"`

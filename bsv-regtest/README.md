@@ -70,7 +70,7 @@ host port). Mining happens on teranodes; SV nodes are followers.
 git clone https://github.com/bsv-blockchain/bsv-regtest.git && cd bsv-regtest
 make build          # tools, alert-system and walletd images + teranode from source (10-20 min, once)
 make up             # 3 teranodes, 2 SV nodes + alert sidecars, kafka, alert hub, arcade, merkle-service, wallet, tools
-make wait           # blocks until the teranodes and SV nodes answer (then checks the sidecar APIs, best effort)
+make wait           # blocks until the teranodes and SV nodes answer and the SV nodes follow the chain (then checks the sidecar APIs, best effort)
 scripts/mine.sh 1 101   # regtest coinbase maturity is 100: block 1's coinbase is now spendable
 make status         # every node's tip, SV peers, alert sequences
 ```
@@ -224,9 +224,17 @@ peers it dialed, so each node's `bitcoin.conf` (`config/svnode/`) lists every te
 stays on the teranodes. The **last** SV node is generated with `acceptnonstdoutputs=0`, so the
 fleet always contains one node with strict standard-output policy: a zero-satoshi bare
 `OP_RETURN <data>` output is dust there (`64: dust`) while every other node, teranode included,
-accepts it. The SV nodes follow the teranode chain over the legacy service; on a stock teranode build this
-needs the legacy-bridge fix (see [`docs/building-teranode.md`](docs/building-teranode.md)), so by
-default they come up as independent miners rather than followers.
+accepts it.
+
+SV Node syncs only from peers advertising NODE_NETWORK. Teranode's legacy service advertises it
+when the block persister has stored a block within the retention window of the tip
+(NODE_NETWORK_LIMITED otherwise), so the generator runs the block persister whenever SV nodes
+are present. The legacy service makes that decision **once, at start-up**: on an empty chain
+nothing is persisted yet and it starts limited. `make wait` takes care of it
+(`scripts/sv-follow.sh`): if a teranode's legacy service started limited, it mines block 1 when
+the chain is empty, waits for that node's persister to store it, restarts the node, and then
+waits for every SV node to reach the teranode tip. On a fresh chain that costs one teranode
+restart and leaves the tip at height 1; on a chain that already has blocks it does nothing.
 
 ```bash
 scripts/rpc.sh sv1 getblockchaininfo | jq '.result | {blocks, bestblockhash}'
@@ -332,11 +340,13 @@ schemas. `make clean` first.
 - **Both SV nodes exited (139) with `boost::condition_variable::do_wait_until failed in
   pthread_cond_timedwait: Invalid argument`** after the host suspended or its clock jumped. A
   Boost issue in bitcoind, no data loss; the services restart on failure, or run `make up`.
-- **An SV node stays at height 0.** `scripts/rpc.sh sv1 getpeerinfo`: each peer's `services`
-  must have the NODE_NETWORK bit (last hex digit odd, `…0021` here). `…0420` means the
-  teranode image lacks patch 0003 or
-  `legacy_advertiseFullNode=true` is missing from `config/teranode/common.env`. SV Node 1.2.0 has
-  an intermittent initial-sync stall; the default image is 1.2.2.
+- **An SV node stays at height 0.** `scripts/rpc.sh sv1 getpeerinfo`: each teranode peer's
+  `services` must have the NODE_NETWORK bit (last hex digit odd, `…0021` here). `…0420` is
+  NODE_NETWORK_LIMITED: the teranode's legacy service started before its block persister had
+  stored a block. Check `startBlockPersister=true` in `config/teranode/common.env`, then run
+  `make wait` (or `scripts/sv-follow.sh 3 2`), which restarts the teranodes that started limited;
+  `$RUNTIME logs bsv-regtest-teranode1 | grep 'determined storage mode'` shows what each start
+  decided. SV Node 1.2.0 has an intermittent initial-sync stall; the default image is 1.2.2.
 - **`alert-svnodeJ: API not up yet`** from `make wait`. go-alert-system opens its web server only
   after two alert peers are connected; it catches up on the next 15 s discovery round.
 - **`Permission denied` under `.data/`.** SV Node and Postgres run as their own users, so their

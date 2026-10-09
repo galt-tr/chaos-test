@@ -73,16 +73,19 @@ addresses and break a node from the inside when a plane is cut.
 SV Node speaks the classic Bitcoin wire protocol, not teranode's libp2p mesh. Teranode bridges
 the two with its **legacy service**, which the generator enables on every teranode when SV
 nodes are present (`startLegacy=true`, `legacy_listen_addresses=0.0.0.0:18444`,
-`legacy_allowSyncCandidateFromLocalPeers=true`, `legacy_advertiseFullNode=true`). SV Node
+`legacy_allowSyncCandidateFromLocalPeers=true`, `startBlockPersister=true`). SV Node
 downloads blocks only from peers it dialed, so each `config/svnode/svnodeJ.conf` lists every
 teranode and the other SV nodes as `connect=` targets (`getpeerinfo` shows them outbound with
 `services` ending in `…01`, NODE_NETWORK). Teranode-mined blocks are announced over the wire
 protocol and served from the announcing teranode. Chain parameters match teranode's regtest
-(go-chaincfg): `genesisactivationheight=100`; teranode's Chronicle activation at height 200
-has no SV counterpart, so keep experiments below height 200 between resets. Mining stays on
-the teranodes. Following the teranode chain over the legacy service needs a teranode build with
-the legacy-bridge fix (see [`building-teranode.md`](building-teranode.md)); without it the SV
-nodes still come up and can be mined on directly.
+(go-chaincfg): `genesisactivationheight=100` and `chronicleactivationheight=200`. Mining stays
+on the teranodes.
+
+SV Node syncs only from peers advertising NODE_NETWORK, and teranode's legacy service advertises
+it only when its block persister has stored a block, deciding once at start-up. That is why the
+generator turns the block persister on with the legacy service, and why `make wait`
+(`scripts/sv-follow.sh`) restarts the teranodes once on a fresh chain; see the README's SV Nodes
+section.
 
 ## Kafka
 
