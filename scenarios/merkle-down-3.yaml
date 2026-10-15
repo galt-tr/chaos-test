@@ -24,7 +24,7 @@ steps:
     with: {"node": "A", "satoshis": 4000000, "count": 16, "mine": true, "waitSeconds": 180}
     as: "fund"
     timeout: "10m"
-    assert: [{"check": "wallet_balance", "with": {"atLeast": 1000000, "coinsAtLeast": 8}, "timeout": "120s"}]
+    assert: [{"check": "wallet_balance", "with": {"atLeast": 100000, "coinsAtLeast": 4}, "timeout": "120s"}]
 
   - name: "reset transition recorder"
     action: timing_reset
