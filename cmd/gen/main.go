@@ -110,6 +110,7 @@ type merkleView struct {
 	Name     string // compose service / inventory key: merkle-service, merkle-service-2, ...
 	HostPort int
 	Suffix   string // "" for the first instance, "-K" after
+	DB       string // its database on merkle-db
 }
 
 func main() {
@@ -168,7 +169,7 @@ func run(n, sv, merkles int, out, image, svImage, discovery string) error {
 		}}
 	// .42/.43 belong to wallet-infra/wallet-db, so instances 2 and 3 sit at .44/.45.
 	for k, last := range []int{41, 44, 45}[:merkles] {
-		mv := merkleView{Name: "merkle-service", HostPort: 18090 + k}
+		mv := merkleView{Name: "merkle-service", HostPort: 18090 + k, DB: fmt.Sprintf("merkle%d", k+1)}
 		if k > 0 {
 			mv.Suffix = fmt.Sprintf("-%d", k+1)
 			mv.Name += mv.Suffix
@@ -335,6 +336,13 @@ func run(n, sv, merkles int, out, image, svImage, discovery string) error {
 		}
 	}
 	if err := render(arcadeCfgTmpl, filepath.Join(cfgDir, "arcade", "config.yaml"), v); err != nil {
+		return err
+	}
+	var initSQL strings.Builder
+	for _, mv := range v.Merkles {
+		fmt.Fprintf(&initSQL, "CREATE DATABASE %s;\n", mv.DB)
+	}
+	if err := os.WriteFile(filepath.Join(cfgDir, "merkle-db-init.sql"), []byte(initSQL.String()), 0o644); err != nil {
 		return err
 	}
 	for _, mv := range v.Merkles {

@@ -205,6 +205,8 @@ services:
     depends_on:
       kafka-shared:
         condition: service_healthy
+      merkle-db:
+        condition: service_healthy
     env_file:
       - ./config/{{ .Name }}.env
     volumes:
@@ -214,6 +216,31 @@ services:
     mem_limit: ${MERKLE_MEM_LIMIT:-1g}
     restart: on-failure
 {{ end }}
+  merkle-db:
+    # Postgres for the merkle-services, one database each (merkle1..N, created by the init
+    # script). sqlite cannot keep up: /watch inserts and block processing contend for the
+    # single writer and the block consumer wedges on SQLITE_BUSY. Profile: merkle.
+    image: ${MERKLE_DB_IMAGE:-docker.io/library/postgres:17-alpine}
+    container_name: chaos-merkle-db
+    profiles: ["merkle"]
+    networks:
+      chaosnet:
+        ipv4_address: 10.190.0.46
+    environment:
+      POSTGRES_USER: merkle
+      POSTGRES_PASSWORD: merkle
+      POSTGRES_DB: merkle
+    command: ["postgres", "-c", "max_connections=300"]
+    volumes:
+      - ./.data/merkle-db:/var/lib/postgresql/data:Z,U
+      - ./config/merkle-db-init.sql:/docker-entrypoint-initdb.d/init.sql:ro,Z
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U merkle -d merkle"]
+      interval: 5s
+      timeout: 5s
+      retries: 20
+    mem_limit: ${MERKLE_DB_MEM_LIMIT:-512m}
+
   wallet-db:
     # Postgres for wallet-infra: the published go-wallet-toolbox image is built without cgo,
     # so its sqlite driver is a stub. Profile: wallet.
@@ -557,8 +584,8 @@ MODE=all-in-one
 LOG_LEVEL=info
 API_PORT=8080
 STORE_BACKEND=sql
-STORE_SQL_DRIVER=sqlite
-STORE_SQL_DSN=file:/data/merkle.db
+STORE_SQL_DRIVER=postgres
+STORE_SQL_DSN=postgres://merkle:merkle@10.190.0.46:5432/{{ .M.DB }}?sslmode=disable
 KAFKA_BROKERS=kafka-shared:9092
 {{- if .M.Suffix }}
 KAFKA_CONSUMER_GROUP=merkle-service{{ .M.Suffix }}

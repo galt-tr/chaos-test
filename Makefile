@@ -43,7 +43,7 @@ build-alert-system: ## go-alert-system hub image (our Dockerfile, fully-qualifie
 	podman build -t localhost/go-alert-system:$(ALERT_SYSTEM_REF) -f $(STACK)/docker/go-alert-system.Dockerfile $(STACK)/vendor/go-alert-system
 
 up: ## start the stack (teranodes, SV nodes + sidecars, kafka, alert hub) + profiles
-	mkdir -p $(STACK)/.data/tools $(STACK)/.data/alert-system $(STACK)/.data/arcade $(STACK)/.data/merkle-service $(STACK)/.data/merkle-service-2 $(STACK)/.data/merkle-service-3 $(STACK)/.data/wallet-db
+	mkdir -p $(STACK)/.data/tools $(STACK)/.data/alert-system $(STACK)/.data/arcade $(STACK)/.data/merkle-service $(STACK)/.data/merkle-service-2 $(STACK)/.data/merkle-service-3 $(STACK)/.data/merkle-db $(STACK)/.data/wallet-db
 	@# the hub image runs as USER 65534; compose asks for :U on .data/alert-system but
 	@# docker-compose (podman's preferred provider when installed) drops it, leaving the
 	@# dir owned by root inside the userns. Do the remap ourselves, provider-independent.
