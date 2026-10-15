@@ -1,0 +1,5 @@
+stack/.data
+stack/vendor
+sim/.data
+sim/ui/node_modules
+.git

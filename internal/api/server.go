@@ -17,6 +17,8 @@ import (
 	"sync"
 	"time"
 
+	"github.com/bsv-blockchain/chaos-test/internal/txtiming"
+
 	"github.com/bsv-blockchain/chaos-test/internal/alerts"
 	"github.com/bsv-blockchain/chaos-test/internal/arcade"
 	"github.com/bsv-blockchain/chaos-test/internal/automine"
@@ -59,6 +61,8 @@ type Deps struct {
 	ArcadeClient *arcade.Client
 	// AutoMine keeps the chain moving on a constant cadence, independent of any page or run.
 	AutoMine *automine.Service
+	// Timing records per-transaction arcade status transitions for latency reports; nil = off.
+	Timing *txtiming.Recorder
 	// BaseCtx outlives any single request: a sustained send must survive the call that
 	// started it and the browser tab that made the call.
 	BaseCtx context.Context
@@ -163,7 +167,7 @@ func (s *Server) NewKey(name, note string) (*KeyEntry, error) { return s.d.Keys.
 // Logs returns a window of a node container's log. Shared by the /api/logs handler and
 // the scenario engine's log_count assertion.
 func (s *Server) Logs(ctx context.Context, node string, opt chaos.LogOptions) (chaos.LogResult, error) {
-	n, err := s.node(node)
+	n, err := s.target(node)
 	if err != nil {
 		return chaos.LogResult{}, err
 	}
@@ -171,7 +175,7 @@ func (s *Server) Logs(ctx context.Context, node string, opt chaos.LogOptions) (c
 }
 
 func (s *Server) Chaos(ctx context.Context, node, action string) error {
-	n, err := s.node(node)
+	n, err := s.target(node)
 	if err != nil {
 		return err
 	}
@@ -184,12 +188,15 @@ func (s *Server) Chaos(ctx context.Context, node, action string) error {
 		err = s.d.Runtime.Stop(ctx, n.Container)
 	case "start":
 		err = s.d.Runtime.Start(ctx, n.Container)
+	case "kill":
+		err = s.d.Runtime.Kill(ctx, n.Container)
 	default:
 		return fmt.Errorf("unknown chaos action %q", action)
 	}
 	if err != nil {
 		return err
 	}
+	s.d.Timing.Mark(fmt.Sprintf("chaos %s %s", action, n.Name))
 	s.d.Bus.Publish("chaos", n.Name, fmt.Sprintf("%s: %s", n.Name, action), map[string]any{"action": action})
 	return nil
 }
@@ -227,6 +234,24 @@ func decode(r *http.Request, v any) error {
 
 func (s *Server) node(name string) (*topology.Node, error) {
 	return s.d.Inventory.Node(name)
+}
+
+// Timing returns the transition recorder (nil when off).
+func (s *Server) Timing() *txtiming.Recorder { return s.d.Timing }
+
+// target resolves a chaos/log/partition target: a node, else a compose service from the
+// inventory (arcade, merkle-service-2, ...) presented as a node with only the fields those
+// operations use. Node-specific callers keep using node().
+func (s *Server) target(name string) (*topology.Node, error) {
+	n, err := s.node(name)
+	if err == nil {
+		return n, nil
+	}
+	svc, ok := s.d.Inventory.Services[name]
+	if !ok || svc.Container == "" {
+		return nil, fmt.Errorf("no node or service %q in inventory", name)
+	}
+	return &topology.Node{Kind: "service", Name: name, Container: svc.Container, ChaosIP: svc.ChaosIP, CtlIP: svc.CtlIP}, nil
 }
 
 // defaultNode is the first teranode (SV nodes have no asset API), else the first node.
@@ -972,7 +997,7 @@ func (s *Server) deleteWatch(w http.ResponseWriter, r *http.Request) {
 
 // Partition connects/disconnects a node's plane (shared with the scenario engine).
 func (s *Server) Partition(ctx context.Context, node, plane string, on bool) error {
-	n, err := s.node(node)
+	n, err := s.target(node)
 	if err != nil {
 		return err
 	}
@@ -1019,6 +1044,7 @@ func (s *Server) Partition(ctx context.Context, node, plane string, on bool) err
 		return err
 	}
 	s.d.Fleet.SetPartition(n.Name, plane, on)
+	s.d.Timing.Mark(fmt.Sprintf("partition %s %s on=%v", n.Name, plane, on))
 	verb := "reconnected to"
 	if on {
 		verb = "partitioned from"
@@ -1071,6 +1097,8 @@ func (s *Server) postChaos(w http.ResponseWriter, r *http.Request) {
 		err = s.d.Runtime.Stop(ctx, n.Container)
 	case "start":
 		err = s.d.Runtime.Start(ctx, n.Container)
+	case "kill":
+		err = s.d.Runtime.Kill(ctx, n.Container)
 	default:
 		writeErr(w, 404, fmt.Errorf("unknown chaos action %q", action))
 		return

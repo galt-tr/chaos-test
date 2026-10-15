@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"path/filepath"
 	"regexp"
 	"strconv"
 	"strings"
@@ -548,6 +549,35 @@ func (x *executor) action(ctx context.Context, name string, w map[string]any) (a
 			"backpressure": st.Backpressure, "canceled": st.Canceled,
 			"measuredTps": st.MeasuredTPS, "elapsedSeconds": st.ElapsedSec}, nil
 
+	case "timing_reset":
+		a.Timing().Reset()
+		return map[string]any{"ok": true}, nil
+	case "timing_mark":
+		a.Timing().Mark(str(w, "label"))
+		return map[string]any{"ok": true}, nil
+	case "timing_wait_terminal":
+		// Waits until every noted transaction is terminal (or the timeout elapses), so the
+		// dump measures the tail instead of cutting it off.
+		deadline := time.Now().Add(time.Duration(num(w, "timeoutSeconds", 300)) * time.Second)
+		for {
+			sum := a.Timing().Summary()
+			open := sum.Total - sum.ByStatus["MINED"] - sum.ByStatus["IMMUTABLE"] - sum.ByStatus["REJECTED"]
+			if open == 0 || time.Now().After(deadline) {
+				return map[string]any{"total": sum.Total, "open": open, "byStatus": sum.ByStatus}, nil
+			}
+			select {
+			case <-ctx.Done():
+				return nil, ctx.Err()
+			case <-time.After(2 * time.Second):
+			}
+		}
+	case "timing_dump":
+		dir := filepath.Join(x.e.d.RunsDir, x.r.ID)
+		if err := a.Timing().Dump(dir); err != nil {
+			return nil, err
+		}
+		sum := a.Timing().Summary()
+		return map[string]any{"dir": dir, "total": sum.Total, "byStatus": sum.ByStatus}, nil
 	case "watch":
 		x.e.d.Fleet.Watch(str(w, "txid"), uint32(num(w, "vout", 0)), str(w, "label"))
 		return map[string]any{"ok": true}, nil

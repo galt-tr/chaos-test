@@ -1,6 +1,7 @@
 # chaos-test: BSV alert-system scenario harness
 N              ?= 3
 SV             ?= 2
+M              ?= 1
 SVNODE_IMAGE   ?= docker.io/bitcoinsv/bitcoin-sv:1.2.2
 TERANODE_REF   ?= fix/1422-height-anchored-freeze
 TERANODE_TAG   ?= pr1764
@@ -15,7 +16,7 @@ PROFILES       ?= --profile tools --profile arcade --profile merkle --profile wa
 .PHONY: gen build build-tools build-teranode build-alert-system walletd-build up down wait status logs tools test test-walletd tidy
 
 gen: ## regenerate stack/compose.yaml + config for N teranodes and SV SV nodes (keys are kept)
-	go run ./cmd/gen -n $(N) -sv $(SV) -out $(STACK) -teranode-image localhost/teranode-chaos:$(TERANODE_TAG) -svnode-image $(SVNODE_IMAGE)
+	go run ./cmd/gen -n $(N) -sv $(SV) -merkle $(M) -out $(STACK) -teranode-image localhost/teranode-chaos:$(TERANODE_TAG) -svnode-image $(SVNODE_IMAGE)
 
 build: build-tools build-alert-system build-teranode walletd-build ## build all images
 
@@ -42,7 +43,7 @@ build-alert-system: ## go-alert-system hub image (our Dockerfile, fully-qualifie
 	podman build -t localhost/go-alert-system:$(ALERT_SYSTEM_REF) -f $(STACK)/docker/go-alert-system.Dockerfile $(STACK)/vendor/go-alert-system
 
 up: ## start the stack (teranodes, SV nodes + sidecars, kafka, alert hub) + profiles
-	mkdir -p $(STACK)/.data/tools $(STACK)/.data/alert-system $(STACK)/.data/arcade $(STACK)/.data/merkle-service $(STACK)/.data/wallet-db
+	mkdir -p $(STACK)/.data/tools $(STACK)/.data/alert-system $(STACK)/.data/arcade $(STACK)/.data/merkle-service $(STACK)/.data/merkle-service-2 $(STACK)/.data/merkle-service-3 $(STACK)/.data/wallet-db
 	@# the hub image runs as USER 65534; compose asks for :U on .data/alert-system but
 	@# docker-compose (podman's preferred provider when installed) drops it, leaving the
 	@# dir owned by root inside the userns. Do the remap ourselves, provider-independent.

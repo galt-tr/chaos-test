@@ -23,6 +23,8 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/bsv-blockchain/chaos-test/internal/txtiming"
+
 	"github.com/bsv-blockchain/chaos-test/internal/alerts"
 	"github.com/bsv-blockchain/chaos-test/internal/api"
 	"github.com/bsv-blockchain/chaos-test/internal/arcade"
@@ -156,6 +158,13 @@ func run(ctx context.Context, lg *slog.Logger, invPath, keysPath, dataDir, liste
 		Interval: time.Duration(autoMineSeconds) * time.Second,
 	})
 
+	// Per-tx transition timing for latency reports: polls arcade for every wallet-sent tx.
+	var timing *txtiming.Recorder
+	if arcadeCl != nil {
+		timing = txtiming.New(arcadeCl, inv.Services["arcade"].URL+"/health")
+		go timing.Run(ctx)
+	}
+
 	var wsvc *walletsvc.Service
 	if walletdURL != "" {
 		wsvc = walletsvc.New(walletsvc.Config{
@@ -165,7 +174,7 @@ func run(ctx context.Context, lg *slog.Logger, invPath, keysPath, dataDir, liste
 	}
 	srv := api.New(api.Deps{Inventory: inv, Bus: bus, Fleet: fleet, AlertLog: alog, AlertHost: host, Signing: signing, Genesis: genesisPubs,
 		Keys: ring, Runtime: rt, Logger: lg, Arcade: arcadeURL, Diag: dg,
-		Wallet: wsvc, ArcadeClient: arcadeCl, AutoMine: am, BaseCtx: ctx})
+		Wallet: wsvc, ArcadeClient: arcadeCl, AutoMine: am, Timing: timing, BaseCtx: ctx})
 	// The miner is the api server, which does not exist until now.
 	am.SetMiner(srv)
 	go am.Run(ctx)

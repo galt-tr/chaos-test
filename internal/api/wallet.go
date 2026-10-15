@@ -90,6 +90,7 @@ func (s *Server) WalletTx(ctx context.Context, req walletsvc.TxRequest) (*wallet
 		target = n.Name
 	}
 
+	sentAt := time.Now()
 	labels := []string{}
 	if req.Label != "" {
 		labels = append(labels, req.Label)
@@ -112,6 +113,7 @@ func (s *Server) WalletTx(ctx context.Context, req walletsvc.TxRequest) (*wallet
 	if !legacy {
 		// The storage server broadcast it to arcade already; the wallet status is the answer.
 		out.Accepted = built.Status != "failed"
+		s.d.Timing.Note(out.TxID, sentAt, time.Now())
 		s.d.Wallet.Tracker().Note(out.TxID, req.Shape, target, built.Satoshis, built.Status)
 		return out, nil
 	}

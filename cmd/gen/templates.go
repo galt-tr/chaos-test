@@ -190,29 +190,30 @@ services:
     mem_limit: ${ARCADE_MEM_LIMIT:-1g}
     restart: on-failure
 
-  merkle-service:
+{{- range .Merkles }}
+  {{ .Name }}:
     # Merkle proof service: follows teranode blocks/subtrees over libp2p, serves callbacks
     # to arcade. sqlite + in-memory blobs; needs Kafka. Profile: merkle.
     image: ${MERKLE_IMAGE:-ghcr.io/bsv-blockchain/merkle-service@sha256:ff4ae409df2680c54267c27887dc1744fb3b64e5ddc5636882185ce82b35ced3}
-    container_name: chaos-merkle-service
+    container_name: {{ .Container }}
     profiles: ["merkle"]
     networks:
       chaosnet:
-        ipv4_address: 10.190.0.41
+        ipv4_address: {{ .ChaosIP }}
       ctlnet:
-        ipv4_address: 10.191.0.41
+        ipv4_address: {{ .CtlIP }}
     depends_on:
       kafka-shared:
         condition: service_healthy
     env_file:
-      - ./config/merkle-service.env
+      - ./config/{{ .Name }}.env
     volumes:
-      - ./.data/merkle-service:/data:Z,U
+      - ./.data/{{ .Name }}:/data:Z,U
     ports:
-      - "${MERKLE_HOST_PORT:-18090}:8080"
+      - "{{ .HostPort }}:8080"
     mem_limit: ${MERKLE_MEM_LIMIT:-1g}
     restart: on-failure
-
+{{ end }}
   wallet-db:
     # Postgres for wallet-infra: the published go-wallet-toolbox image is built without cgo,
     # so its sqlite driver is a stub. Profile: wallet.
@@ -495,7 +496,14 @@ datahub_urls:
 teranode:
   auth_token: ""
 merkle_service:
+{{- if gt (len .Merkles) 1 }}
+  urls:
+{{- range .Merkles }}
+    - {{ .ChaosURL }}
+{{- end }}
+{{- else }}
   url: {{ .Merkle.ChaosURL }}
+{{- end }}
   auth_token: ""
 p2p:
   seeds: []
@@ -552,6 +560,17 @@ STORE_BACKEND=sql
 STORE_SQL_DRIVER=sqlite
 STORE_SQL_DSN=file:/data/merkle.db
 KAFKA_BROKERS=kafka-shared:9092
+{{- if .M.Suffix }}
+KAFKA_CONSUMER_GROUP=merkle-service{{ .M.Suffix }}
+KAFKA_SUBTREE_TOPIC=subtree{{ .M.Suffix }}
+KAFKA_BLOCK_TOPIC=block{{ .M.Suffix }}
+KAFKA_CALLBACK_TOPIC=callback{{ .M.Suffix }}
+KAFKA_CALLBACK_SEEN_TOPIC=callback-seen{{ .M.Suffix }}
+KAFKA_CALLBACK_DLQ_TOPIC=callback-dlq{{ .M.Suffix }}
+KAFKA_SUBTREE_DLQ_TOPIC=subtree-dlq{{ .M.Suffix }}
+KAFKA_SUBTREE_WORK_TOPIC=subtree-work{{ .M.Suffix }}
+KAFKA_SUBTREE_WORK_DLQ_TOPIC=subtree-work-dlq{{ .M.Suffix }}
+{{- end }}
 P2P_NETWORK=regtest
 P2P_BOOTSTRAP_PEERS={{ join .P2PAddrs "," }}
 P2P_DHT_MODE=off

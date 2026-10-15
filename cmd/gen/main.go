@@ -97,8 +97,19 @@ type view struct {
 	DatahubURLs    []string // http://<chaosIP>:8090/api/v1 per node
 	P2PAddrs       []string // node main-p2p multiaddrs (chaosnet)
 	Arcade         topology.Service
-	Merkle         topology.Service
+	Merkle         topology.Service // first merkle-service instance (kept for single-instance callers)
+	Merkles        []merkleView     // every merkle-service instance; arcade fans out to all of them when >1
 	Wallet         topology.Service
+}
+
+// merkleView is one merkle-service instance. Instances share kafka-shared, so every
+// instance after the first gets its own consumer group and topic suffix; otherwise they
+// would split one pipeline's partitions between them instead of running independently.
+type merkleView struct {
+	topology.Service
+	Name     string // compose service / inventory key: merkle-service, merkle-service-2, ...
+	HostPort int
+	Suffix   string // "" for the first instance, "-K" after
 }
 
 func main() {
@@ -108,7 +119,12 @@ func main() {
 	image := flag.String("teranode-image", "localhost/teranode-chaos:pr1764", "default teranode image")
 	svImage := flag.String("svnode-image", "docker.io/bitcoinsv/bitcoin-sv:1.2.2", "default SV node image")
 	discovery := flag.String("alert-discovery-interval", "15s", "alert p2p peer discovery interval")
+	merkles := flag.Int("merkle", 1, "number of merkle-service instances (1..3); arcade registers with all of them")
 	flag.Parse()
+	if *merkles < 1 || *merkles > 3 {
+		fmt.Fprintln(os.Stderr, "-merkle must be in 1..3")
+		os.Exit(2)
+	}
 	if *n < 2 || *n > 10 {
 		fmt.Fprintln(os.Stderr, "-n must be in 2..10")
 		os.Exit(2)
@@ -117,13 +133,13 @@ func main() {
 		fmt.Fprintln(os.Stderr, "-sv must be in 0..5")
 		os.Exit(2)
 	}
-	if err := run(*n, *sv, *out, *image, *svImage, *discovery); err != nil {
+	if err := run(*n, *sv, *merkles, *out, *image, *svImage, *discovery); err != nil {
 		fmt.Fprintln(os.Stderr, "error:", err)
 		os.Exit(1)
 	}
 }
 
-func run(n, sv int, out, image, svImage, discovery string) error {
+func run(n, sv, merkles int, out, image, svImage, discovery string) error {
 	cfgDir := filepath.Join(out, "config")
 	dirs := []string{filepath.Join(cfgDir, "teranode"), filepath.Join(cfgDir, "alert-system"), filepath.Join(out, "scripts")}
 	if sv > 0 {
@@ -150,8 +166,18 @@ func run(n, sv int, out, image, svImage, discovery string) error {
 			"events":      {URL: "http://10.191.0.40:8082", HostURL: "http://localhost:18082"},
 			"chaintracks": {URL: "http://10.191.0.40:8083", HostURL: "http://localhost:18083"},
 		}}
-	v.Merkle = topology.Service{URL: "http://10.191.0.41:8080", HostURL: "http://localhost:18090", Container: "chaos-merkle-service",
-		Endpoint: topology.Endpoint{ChaosIP: "10.190.0.41", CtlIP: "10.191.0.41"}}
+	// .42/.43 belong to wallet-infra/wallet-db, so instances 2 and 3 sit at .44/.45.
+	for k, last := range []int{41, 44, 45}[:merkles] {
+		mv := merkleView{Name: "merkle-service", HostPort: 18090 + k}
+		if k > 0 {
+			mv.Suffix = fmt.Sprintf("-%d", k+1)
+			mv.Name += mv.Suffix
+		}
+		mv.Service = topology.Service{URL: fmt.Sprintf("http://10.191.0.%d:8080", last), HostURL: fmt.Sprintf("http://localhost:%d", mv.HostPort),
+			Container: "chaos-" + mv.Name, Endpoint: topology.Endpoint{ChaosIP: fmt.Sprintf("10.190.0.%d", last), CtlIP: fmt.Sprintf("10.191.0.%d", last)}}
+		v.Merkles = append(v.Merkles, mv)
+	}
+	v.Merkle = v.Merkles[0].Service
 	v.Wallet = topology.Service{URL: "http://10.191.0.42:8100", HostURL: "http://localhost:18100", Container: "chaos-wallet-infra",
 		Endpoint: topology.Endpoint{ChaosIP: "10.190.0.42", CtlIP: "10.191.0.42"}}
 	for _, g := range kf.Genesis {
@@ -233,7 +259,9 @@ func run(n, sv int, out, image, svImage, discovery string) error {
 		inv.Nodes[i].LegacyPeers = peers
 	}
 	inv.Services["arcade"] = v.Arcade
-	inv.Services["merkle-service"] = v.Merkle
+	for _, mv := range v.Merkles {
+		inv.Services[mv.Name] = mv.Service
+	}
 	inv.Services["wallet-infra"] = v.Wallet
 	teranodes := inv.Teranodes()
 	for i := range teranodes {
@@ -309,8 +337,13 @@ func run(n, sv int, out, image, svImage, discovery string) error {
 	if err := render(arcadeCfgTmpl, filepath.Join(cfgDir, "arcade", "config.yaml"), v); err != nil {
 		return err
 	}
-	if err := render(merkleEnvTmpl, filepath.Join(cfgDir, "merkle-service.env"), v); err != nil {
-		return err
+	for _, mv := range v.Merkles {
+		if err := render(merkleEnvTmpl, filepath.Join(cfgDir, mv.Name+".env"), struct {
+			view
+			M merkleView
+		}{v, mv}); err != nil {
+			return err
+		}
 	}
 	if err := render(walletCfgTmpl, filepath.Join(cfgDir, "wallet-infra", "infra-config.yaml"), v); err != nil {
 		return err

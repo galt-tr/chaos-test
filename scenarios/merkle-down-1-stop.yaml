@@ -1,0 +1,89 @@
+id: merkle-down-1-stop
+name: "One merkle-service stopped (graceful), then started"
+description: >
+  One merkle-service stopped (graceful), then started. Blaster runs through arcade with the multi-merkle Pool (PR #362/#363); transitions recorded per tx at 1 s resolution.
+requires: [regtest]
+roles:
+  A: teranode1
+  B: teranode2
+  C: teranode3
+params:
+  tps: 2
+steps:
+  - name: "block cadence 30s"
+    action: automine
+    with: {"enabled": true, "intervalSeconds": 30, "node": "A", "blocks": 1}
+
+  - name: "converge the fleet"
+    action: mine
+    with: {"node": "A", "blocks": 2}
+    assert: [{"check": "same_tip", "with": {"nodes": ["A", "B", "C"]}, "timeout": "90s"}]
+
+  - name: "top up the wallet"
+    action: wallet_topup
+    with: {"node": "A", "satoshis": 4000000, "count": 16, "mine": true, "waitSeconds": 180}
+    as: "fund"
+    timeout: "10m"
+    assert: [{"check": "wallet_balance", "with": {"atLeast": 1000000, "coinsAtLeast": 8}, "timeout": "120s"}]
+
+  - name: "reset transition recorder"
+    action: timing_reset
+
+  - name: "mark"
+    action: mark
+    as: "m0"
+
+  - name: "start the blaster"
+    action: wallet_send_start
+    with: {"tps": "${tps}", "workers": 2, "shape": "opreturn"}
+    as: "blast"
+
+  - name: "warm-up (all endpoints up)"
+    action: wait
+    with: {"seconds": 60}
+
+  - name: "timing mark fault"
+    action: timing_mark
+    with: {"label": "fault-window-start"}
+
+  - name: "FAULT stop merkle-service"
+    action: chaos
+    with: {"node": "merkle-service", "action": "stop"}
+
+  - name: "one endpoint down"
+    action: wait
+    with: {"seconds": 90}
+
+  - name: "HEAL start merkle-service"
+    action: chaos
+    with: {"node": "merkle-service", "action": "start"}
+
+  - name: "timing mark heal"
+    action: timing_mark
+    with: {"label": "fault-window-end"}
+
+  - name: "recovery window"
+    action: wait
+    with: {"seconds": 90}
+
+  - name: "stop the blaster"
+    action: wallet_send_stop
+    with: {"timeoutSeconds": 30}
+    as: "stopped"
+
+  - name: "wait for every tx to be terminal"
+    action: timing_wait_terminal
+    with: {"timeoutSeconds": 480}
+    as: "tail"
+    timeout: "9m"
+    assert: [{"check": "expr", "with": {"left": "${tail.open}", "op": "==", "right": "0"}, "message": "every submitted tx reached a terminal status", "should": true}]
+
+  - name: "dump transitions"
+    action: timing_dump
+    as: "dump"
+
+  - name: "summary"
+    action: note
+    with: {"message": "attempted=${stopped.attempted} walletTook=${stopped.succeeded} failed=${stopped.failed} open=${tail.open}"}
+    assert: [{"check": "no_event", "with": {"kind": "wallet_divergence", "since": "${m0.eventId}"}, "should": true, "message": "wallet and network agreed"}, {"check": "same_tip", "with": {"nodes": ["A", "B", "C"]}, "timeout": "180s"}]
+

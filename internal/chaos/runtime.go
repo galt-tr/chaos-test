@@ -27,6 +27,9 @@ type Runtime interface {
 	Pause(ctx context.Context, container string) error
 	Unpause(ctx context.Context, container string) error
 	Stop(ctx context.Context, container string) error
+	// Kill sends SIGKILL: no graceful shutdown. A container with restart: on-failure is
+	// brought back by the engine, so kill models a crash-and-restart, stop an outage.
+	Kill(ctx context.Context, container string) error
 	Start(ctx context.Context, container string) error
 	State(ctx context.Context, container string) (string, error)
 	// Networks lists the networks a container is currently attached to.
@@ -150,6 +153,11 @@ func (r *socketRuntime) Unpause(ctx context.Context, c string) error {
 
 func (r *socketRuntime) Stop(ctx context.Context, c string) error {
 	_, err := r.do(ctx, http.MethodPost, "/containers/"+c+"/stop?t=10", nil)
+	return err
+}
+
+func (r *socketRuntime) Kill(ctx context.Context, c string) error {
+	_, err := r.do(ctx, http.MethodPost, "/containers/"+c+"/kill?signal=SIGKILL", nil)
 	return err
 }
 
@@ -323,6 +331,10 @@ func (r *cliRuntime) Stop(ctx context.Context, c string) error {
 	_, err := r.run(ctx, "stop", "-t", "10", c)
 	return err
 }
+func (r *cliRuntime) Kill(ctx context.Context, c string) error {
+	_, err := r.run(ctx, "kill", "-s", "KILL", c)
+	return err
+}
 func (r *cliRuntime) Start(ctx context.Context, c string) error {
 	_, err := r.run(ctx, "start", c)
 	return err
@@ -385,6 +397,7 @@ func (noRuntime) Pause(context.Context, string) error                          {
 func (noRuntime) Unpause(context.Context, string) error                        { return errNoRuntime }
 func (noRuntime) Stop(context.Context, string) error                           { return errNoRuntime }
 func (noRuntime) Start(context.Context, string) error                          { return errNoRuntime }
+func (noRuntime) Kill(context.Context, string) error                           { return errNoRuntime }
 func (noRuntime) State(context.Context, string) (string, error)                { return "", errNoRuntime }
 func (noRuntime) Networks(context.Context, string) ([]string, error)           { return nil, errNoRuntime }
 func (noRuntime) Logs(context.Context, string, LogOptions) (LogResult, error) {
