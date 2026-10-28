@@ -388,7 +388,7 @@ func (x *executor) action(ctx context.Context, name string, w map[string]any) (a
 		if tx != nil {
 			hexs, ef = str(tx, "hex"), str(tx, "efHex")
 		}
-		res, err := a.Submit(ctx, target, hexs, ef)
+		res, err := a.Submit(ctx, target, hexs, ef, submitOpts(w))
 		if err != nil {
 			return nil, err
 		}
@@ -551,6 +551,40 @@ func (x *executor) action(ctx context.Context, name string, w map[string]any) (a
 	case "watch":
 		x.e.d.Fleet.Watch(str(w, "txid"), uint32(num(w, "vout", 0)), str(w, "label"))
 		return map[string]any{"ok": true}, nil
+	case "chain":
+		// A dependent chain from one funded outpoint, submitted back to back without waiting:
+		// the shape that exercises a broadcaster's parent-before-child ordering.
+		req := api.ChainRequest{TxID: str(w, "txid"), Vout: uint32(num(w, "vout", 0)), Key: str(w, "key"),
+			Depth: int(num(w, "depth", 10)), Fee: uint64(num(w, "fee", 500)), Target: str(w, "target"), Opts: submitOpts(w)}
+		if n := str(w, "node"); n != "" {
+			req.Node = x.node(n)
+		}
+		if req.Target != "" && req.Target != "arcade" {
+			req.Target = x.node(req.Target)
+		}
+		res, err := a.Chain(ctx, req)
+		if err != nil {
+			return nil, err
+		}
+		txids := make([]any, len(res.TxIDs))
+		hops := map[string]any{}
+		for i, h := range res.Hops {
+			txids[i] = h.TxID
+			// Keyed by index as a string so a later step can take one hop: ${c.hops.1.efHex}.
+			hops[strconv.Itoa(i)] = map[string]any{"txid": h.TxID, "hex": h.Hex, "efHex": h.EFHex}
+		}
+		rejected := make([]any, len(res.Rejected))
+		for i, r := range res.Rejected {
+			rejected[i] = r
+		}
+		return map[string]any{"txids": txids, "hops": hops, "first": res.First, "last": res.Last, "depth": len(res.TxIDs),
+			"submitted": res.Submitted, "accepted": res.Accepted, "rejected": rejected, "elapsedMs": res.ElapsedMs}, nil
+	case "sse_listen":
+		l, err := a.ArcadeSSEListen(str(w, "token"))
+		if err != nil {
+			return nil, err
+		}
+		return map[string]any{"token": l.Token, "connected": true}, nil
 	case "wait_for":
 		ar := x.assert(ctx, Assertion{Check: str(w, "check"), With: mapOf(w["with"]), Timeout: str(w, "timeout")}, 0)
 		if !ar.Passed {
@@ -842,6 +876,85 @@ func (x *executor) check(ctx context.Context, name string, w map[string]any, sin
 		return got == want, fmt.Sprintf("arcade chaintracks has %s at height %d (want %s)",
 			short(got), height, short(want))
 
+	case "arcade_tx":
+		// One GET /tx record against the expectations in `with` (see arcadeTxMatches). Polls:
+		// every status arcade reports converges asynchronously.
+		txid := str(w, "txid")
+		rec, err := x.e.d.API.ArcadeTx(ctx, txid)
+		if err != nil {
+			if errors.Is(err, arcade.ErrTxNotFound) {
+				return false, "arcade has no record of " + short(txid)
+			}
+			return false, err.Error()
+		}
+		return arcadeTxMatches(rec, w)
+
+	case "arcade_txs":
+		// Every listed tx at one of the statuses, with a per-status census as the detail, so
+		// a partial outcome (most accepted, a few parked) reads as such in the run.
+		ids := stringList(w["txids"])
+		if len(ids) == 0 {
+			return false, "no txids given"
+		}
+		want := stringList(w["statusIn"])
+		counts := map[string]int{}
+		var off []string
+		for _, id := range ids {
+			rec, err := x.e.d.API.ArcadeTx(ctx, id)
+			st := arcade.StatusNotFound
+			if err == nil {
+				st = rec.Status
+			} else if !errors.Is(err, arcade.ErrTxNotFound) {
+				return false, err.Error()
+			}
+			counts[st]++
+			if !containsStr(want, st) && len(off) < 5 {
+				off = append(off, short(id)+"="+st)
+			}
+		}
+		ok := true
+		for st := range counts {
+			if !containsStr(want, st) {
+				ok = false
+			}
+		}
+		detail := fmt.Sprintf("%d txs: %v, want all in %v", len(ids), counts, want)
+		if len(off) > 0 {
+			detail += "; e.g. " + strings.Join(off, ", ")
+		}
+		return ok, detail
+
+	case "arcade_policy":
+		p, err := x.e.d.API.ArcadePolicy(ctx)
+		if err != nil {
+			return false, err.Error()
+		}
+		detail := fmt.Sprintf("standardFormatSupported=%v miningFee=%d/%d maxtxsizepolicy=%d",
+			p.StandardFormatSupported, p.MiningFee.Satoshis, p.MiningFee.Bytes, p.MaxTxSizePolicy)
+		if _, ok := w["standardFormatSupported"]; ok {
+			want := boolean(w, "standardFormatSupported")
+			return p.StandardFormatSupported == want, detail + fmt.Sprintf(", want standardFormatSupported=%v", want)
+		}
+		return true, detail
+
+	case "sse_seen":
+		// What the token-scoped /events subscriber opened by sse_listen was actually pushed.
+		token, txid, status := str(w, "token"), str(w, "txid"), str(w, "status")
+		l, ok := x.e.d.API.ArcadeSSE(token)
+		if !ok {
+			return false, "no sse_listen for token " + token
+		}
+		seen := l.Statuses(txid)
+		open, rerr := l.Open()
+		detail := fmt.Sprintf("frames pushed for %s: %v", short(txid), seen)
+		if !open {
+			detail += fmt.Sprintf(" (stream closed: %v)", rerr)
+		}
+		if status == "" {
+			return len(seen) > 0, detail
+		}
+		return l.Seen(txid, status), detail + ", want " + status
+
 	case "expr":
 		l, r := str(w, "left"), str(w, "right")
 		op := str(w, "op")
@@ -855,6 +968,8 @@ func (x *executor) check(ctx context.Context, name string, w map[string]any, sin
 			return l != r, fmt.Sprintf("%q != %q", l, r)
 		case "contains":
 			return strings.Contains(l, r), fmt.Sprintf("%q contains %q", l, r)
+		case "not_contains":
+			return !strings.Contains(l, r), fmt.Sprintf("%q not_contains %q", l, r)
 		}
 		return false, "unknown op " + op
 	}
@@ -960,4 +1075,109 @@ func num2f(w map[string]any, key string, def float64) float64 {
 		}
 	}
 	return def
+}
+
+// submitOpts reads the optional arcade subscription headers off a submit/chain `with`.
+func submitOpts(w map[string]any) api.SubmitOpts {
+	return api.SubmitOpts{CallbackToken: str(w, "callbackToken"), CallbackURL: str(w, "callbackUrl"), FullStatusUpdates: boolean(w, "fullStatusUpdates")}
+}
+
+// stringList reads a list value: a YAML list, a resolved ${...} list, or a comma-separated string.
+func stringList(v any) []string {
+	var out []string
+	switch t := v.(type) {
+	case []any:
+		for _, e := range t {
+			if s := strings.TrimSpace(fmt.Sprint(e)); s != "" {
+				out = append(out, s)
+			}
+		}
+	case []string:
+		out = append(out, t...)
+	case string:
+		for _, s := range strings.Split(t, ",") {
+			if s = strings.TrimSpace(s); s != "" {
+				out = append(out, s)
+			}
+		}
+	}
+	return out
+}
+
+func containsStr(list []string, s string) bool {
+	for _, e := range list {
+		if e == s {
+			return true
+		}
+	}
+	return false
+}
+
+// zeroTime is how arcade serialises an unset time.Time field.
+const zeroTime = "0001-01-01T00:00:00Z"
+
+// arcadeTxMatches compares one GET /tx record with the expectations in `with`: `status` or
+// `statusIn`, `statusCode`, `extraInfoContains`, `extraInfoAbsent`, `nextRetryAtAbsent`,
+// `nextRetryAtUnset`, `merkleRegisteredAtAbsent`, `competingTxsContains`. With no expectation
+// it passes and just describes the record, which is how a step records evidence.
+func arcadeTxMatches(rec *arcade.TxRecord, w map[string]any) (bool, string) {
+	detail := fmt.Sprintf("%s is %s", short(rec.TxID), rec.Status)
+	if rec.StatusCode != 0 {
+		detail += fmt.Sprintf(" (%d)", rec.StatusCode)
+	}
+	if rec.ExtraInfo != "" {
+		info := rec.ExtraInfo
+		if len(info) > 160 {
+			info = info[:160] + "…"
+		}
+		detail += " extraInfo=" + strconv.Quote(info)
+	}
+	if rec.NextRetryAt != "" {
+		detail += " nextRetryAt=" + rec.NextRetryAt
+	}
+	if rec.MerkleRegisteredAt != "" {
+		detail += " merkleRegisteredAt=" + rec.MerkleRegisteredAt
+	}
+	if len(rec.CompetingTxs) > 0 {
+		var cs []string
+		for _, c := range rec.CompetingTxs {
+			cs = append(cs, short(c))
+		}
+		detail += fmt.Sprintf(" competingTxs=%v", cs)
+	}
+	var problems []string
+	if want := str(w, "status"); want != "" && rec.Status != want {
+		problems = append(problems, "want status "+want)
+	}
+	if want := stringList(w["statusIn"]); len(want) > 0 && !containsStr(want, rec.Status) {
+		problems = append(problems, fmt.Sprintf("want status in %v", want))
+	}
+	if want := num(w, "statusCode", 0); want != 0 && int64(rec.StatusCode) != want {
+		problems = append(problems, fmt.Sprintf("want status code %d", want))
+	}
+	if want := str(w, "extraInfoContains"); want != "" && !strings.Contains(rec.ExtraInfo, want) {
+		problems = append(problems, fmt.Sprintf("want extraInfo containing %q", want))
+	}
+	if boolean(w, "extraInfoAbsent") && rec.ExtraInfo != "" {
+		problems = append(problems, "want no extraInfo")
+	}
+	if boolean(w, "nextRetryAtAbsent") && rec.NextRetryAt != "" {
+		problems = append(problems, "want no nextRetryAt")
+	}
+	// nextRetryAtUnset is the weaker form: no retry is scheduled, whether the field is
+	// absent or serialised as the Go zero time. It separates "the schedule was cleared"
+	// (report issue 3) from "a zero time is rendered" (report issue 6b).
+	if boolean(w, "nextRetryAtUnset") && rec.NextRetryAt != "" && rec.NextRetryAt != zeroTime {
+		problems = append(problems, "want no retry scheduled")
+	}
+	if boolean(w, "merkleRegisteredAtAbsent") && rec.MerkleRegisteredAt != "" {
+		problems = append(problems, "want no merkleRegisteredAt")
+	}
+	if want := str(w, "competingTxsContains"); want != "" && !containsStr(rec.CompetingTxs, want) {
+		problems = append(problems, "want competingTxs containing "+short(want))
+	}
+	if len(problems) > 0 {
+		return false, detail + "; " + strings.Join(problems, ", ")
+	}
+	return true, detail
 }

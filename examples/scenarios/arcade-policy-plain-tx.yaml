@@ -1,0 +1,85 @@
+id: arcade-policy-plain-tx
+name: Arcade advertises standardFormatSupported, yet rejects every plain (non-EF) transaction
+description: >
+  Reproduces issues 1 and 6a of the hosted-service test report (28 Oct 2026). GET /policy says
+  standardFormatSupported: true, so a wallet that reads the policy to pick a format builds a plain
+  raw transaction - and intake refuses it with 400 / ARC 460 ("could not be transformed to extended
+  format: missing input source data"), because the validator needs each input's source output and
+  arcade fetches it from nowhere. The same bytes as Extended Format are accepted. The 460 reason
+  text also repeated itself ("<msg>: <msg>") - issue 6a - which the not_contains check pins down.
+
+  Expected outcome with the fixes: the plain submission is still refused with 460 (that part is by
+  design), the reason reads once, and /policy advertises standardFormatSupported: false. Each
+  divergence is recorded as a finding rather than stopping the run.
+
+  Funding comes from a coinbase already past the 100-block maturity, so the chain must be at
+  height >= 110 (mine up to it, or let the auto-miner run after `make reset`).
+requires: [regtest]
+roles:
+  A: teranode1
+  B: teranode2
+  C: teranode3
+steps:
+  - name: stop the auto-miner so the funding height stays put during the run
+    action: automine
+    with: { enabled: false }
+
+  - name: advance the tip two blocks, so each run funds itself from a different coinbase
+    action: mine
+    with: { node: A, blocks: 2 }
+    assert:
+      - { check: same_tip, with: { nodes: [A, B, C] }, timeout: 180s }
+
+  - name: record the tip the funding height is measured back from
+    action: set
+    with: { baseH: "${tip(A)}" }
+
+  - name: take a funding coinbase 101 deep, comfortably past maturity
+    action: coinbase
+    with: { node: A, height: "${baseH - 101}" }
+    as: fund
+
+  - name: build a valid spend of it
+    action: spend
+    with: { node: A, txid: "${fund.txid}", vout: 0, key: miner, fee: 500 }
+    as: t
+
+  - name: submit it to arcade as PLAIN hex, without the inputs' source data
+    action: submit
+    with: { target: arcade, hex: "${t.hex}" }
+    as: plain
+    assert:
+      - check: expr
+        with: { left: "${plain.accepted}", right: "false" }
+        message: a transaction whose inputs carry no source output cannot be validated, so a plain submission is refused
+      - check: expr
+        with: { left: "${plain.body}", op: contains, right: "460" }
+        message: and the refusal carries ARC code 460 (not extended format)
+      - check: expr
+        with: { left: "${plain.body}", op: not_contains, right: "input 0: transaction could not be transformed" }
+        should: true
+        message: the reason should state the cause once, not twice (report issue 6a)
+
+  - name: the same transaction as Extended Format is accepted
+    action: submit
+    with: { target: arcade, tx: "${t}" }
+    as: ef
+    assert:
+      - check: expr
+        with: { left: "${ef.accepted}", right: "true" }
+        message: EF carries the source outputs intake needs
+
+  - name: what /policy advertises, for the record
+    action: wait_for
+    with: { check: arcade_policy, with: {}, timeout: 10s }
+    as: policy
+    assert:
+      - check: arcade_policy
+        with: { standardFormatSupported: false }
+        timeout: 5s
+        should: true
+        message: a wallet trusting standardFormatSupported=true builds the one format intake refuses (report issue 1)
+
+  - name: restore the auto-miner
+    action: automine
+    with: { enabled: true }

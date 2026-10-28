@@ -1,0 +1,92 @@
+id: arcade-retry-recovery
+name: A transaction parked for durable retry recovers cleanly once its parent arrives
+description: >
+  Reproduces issue 3 of the hosted-service test report (28 Oct 2026). A child is submitted before
+  its parent, so the datahubs answer TX_MISSING_PARENT until arcade's fast-path budget (five
+  attempts, 2 s apart) is spent and the child is parked at PENDING_RETRY with the reason "parent not
+  yet accepted by the network after 5 propagation attempts". The parent is then submitted and the
+  reaper (5 s cadence in bsv-regtest) rebroadcasts the child, which the network accepts.
+
+  On the hosted service a recovered transaction kept the stale park reason in extraInfo and a
+  nextRetryAt. Expected outcome with the fix: once the child is ACCEPTED_BY_NETWORK or beyond,
+  GET /tx shows no park reason and no retry schedule (nextRetryAtUnset tolerates the zero-time
+  rendering, which is report issue 6b and is checked by arcade-double-spend). The stale fields
+  are recorded as a finding.
+requires: [regtest]
+roles:
+  A: teranode1
+  B: teranode2
+  C: teranode3
+params:
+  parkSeconds: 15
+steps:
+  - name: stop the auto-miner so the parent is not mined from under the test
+    action: automine
+    with: { enabled: false }
+
+  - name: advance the tip two blocks, so each run funds itself from a different coinbase
+    action: mine
+    with: { node: A, blocks: 2 }
+    assert:
+      - { check: same_tip, with: { nodes: [A, B, C] }, timeout: 180s }
+
+  - name: record the tip the funding height is measured back from
+    action: set
+    with: { baseH: "${tip(A)}" }
+
+  - name: take a funding coinbase 101 deep, comfortably past maturity
+    action: coinbase
+    with: { node: A, height: "${baseH - 101}" }
+    as: fund
+
+  - name: build parent and child without submitting either
+    action: chain
+    with: { node: A, txid: "${fund.txid}", vout: 0, key: miner, depth: 2, fee: 500 }
+    as: c
+
+  - name: submit the CHILD first, so arcade holds an orphan
+    action: submit
+    with: { target: arcade, tx: "${c.hops.1}" }
+    as: child
+    assert:
+      - { check: expr, with: { left: "${child.accepted}", right: "true" } }
+
+  - name: let the fast-path budget run out, so the child is parked
+    action: wait
+    with: { seconds: "${parkSeconds}" }
+
+  - name: the child is PENDING_RETRY with the missing-parent reason
+    action: wait_for
+    with:
+      check: arcade_tx
+      with: { txid: "${c.hops.1.txid}", status: PENDING_RETRY, extraInfoContains: "parent not yet accepted" }
+      timeout: 30s
+    as: parked
+
+  - name: now submit the parent
+    action: submit
+    with: { target: arcade, tx: "${c.hops.0}" }
+    as: parent
+    assert:
+      - { check: expr, with: { left: "${parent.accepted}", right: "true" } }
+      - check: arcade_tx
+        with: { txid: "${c.hops.0.txid}", statusIn: [ACCEPTED_BY_NETWORK, SEEN_ON_NETWORK, SEEN_MULTIPLE_NODES] }
+        timeout: 60s
+
+  - name: the reaper rebroadcasts the child and the network accepts it
+    action: wait_for
+    with:
+      check: arcade_tx
+      with: { txid: "${c.hops.1.txid}", statusIn: [ACCEPTED_BY_NETWORK, SEEN_ON_NETWORK, SEEN_MULTIPLE_NODES] }
+      timeout: 90s
+    as: recovered
+    assert:
+      - check: arcade_tx
+        with: { txid: "${c.hops.1.txid}", extraInfoAbsent: true, nextRetryAtUnset: true }
+        timeout: 5s
+        should: true
+        message: a recovered transaction should keep neither the stale park reason nor a retry schedule (report issue 3)
+
+  - name: restore the auto-miner
+    action: automine
+    with: { enabled: true }

@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"time"
 
 	"github.com/bsv-blockchain/chaos-test/internal/arcade"
 )
@@ -37,4 +38,68 @@ func (s *Server) ArcadeCanonicalHashAt(ctx context.Context, height uint32) (stri
 		return "", fmt.Errorf("arcade returned no header at height %d", height)
 	}
 	return h.Hash, nil
+}
+
+// ArcadeTx reads arcade's GET /tx/{txid}. arcade.ErrTxNotFound passes through unchanged so a
+// polling caller can tell "not yet" from a broken arcade.
+func (s *Server) ArcadeTx(ctx context.Context, txid string) (*arcade.TxRecord, error) {
+	if s.d.ArcadeClient == nil {
+		return nil, errors.New("arcade is not configured in the inventory")
+	}
+	if txid == "" {
+		return nil, errors.New("a txid is required")
+	}
+	return s.d.ArcadeClient.GetTx(ctx, txid)
+}
+
+// ArcadePolicy reads what arcade advertises on GET /policy.
+func (s *Server) ArcadePolicy(ctx context.Context) (*arcade.Policy, error) {
+	if s.d.ArcadeClient == nil {
+		return nil, errors.New("arcade is not configured in the inventory")
+	}
+	return s.d.ArcadeClient.GetPolicy(ctx)
+}
+
+// sseLifetime bounds a scenario's /events subscription: long enough for any run, short enough
+// that an abandoned listener does not hold a connection on arcade for the life of the process.
+const sseLifetime = 20 * time.Minute
+
+// ArcadeSSEListen opens a token-scoped subscription to arcade's /events stream, replacing any
+// earlier listener for the same token, and returns once it is registered.
+func (s *Server) ArcadeSSEListen(token string) (*arcade.SSEListener, error) {
+	if s.d.ArcadeEvents == "" {
+		return nil, errors.New("arcade events URL is not configured in the inventory")
+	}
+	if token == "" {
+		return nil, errors.New("a token is required")
+	}
+	base := s.d.BaseCtx
+	if base == nil {
+		base = context.Background()
+	}
+	ctx, cancel := context.WithTimeout(base, sseLifetime)
+	l, err := arcade.ListenSSE(ctx, s.d.ArcadeEvents, token)
+	if err != nil {
+		cancel()
+		return nil, err
+	}
+	go func() { <-ctx.Done(); cancel() }()
+	s.sseListenMu.Lock()
+	defer s.sseListenMu.Unlock()
+	if old, ok := s.sseListeners[token]; ok {
+		old.Close()
+	}
+	if s.sseListeners == nil {
+		s.sseListeners = map[string]*arcade.SSEListener{}
+	}
+	s.sseListeners[token] = l
+	return l, nil
+}
+
+// ArcadeSSE returns the listener opened for token, if any.
+func (s *Server) ArcadeSSE(token string) (*arcade.SSEListener, bool) {
+	s.sseListenMu.Lock()
+	defer s.sseListenMu.Unlock()
+	l, ok := s.sseListeners[token]
+	return l, ok
 }
