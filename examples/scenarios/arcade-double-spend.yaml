@@ -1,0 +1,141 @@
+id: arcade-double-spend
+name: The losing side of a double spend is REJECTED 466 naming the winner, and reports it cleanly
+description: >
+  Documents issues 4 and 5 of the hosted-service test report (28 Oct 2026) and reproduces 6b.
+  Two transactions spend the same mature coinbase output. The first is submitted and accepted by
+  the network; the second is then submitted, gets 202 like any submission, and is REJECTED with
+  ARC code 466, UTXO_SPENT in extraInfo and the winner in competingTxs. That is arcade's
+  double-spend verdict by design (arcade PR #357): DOUBLE_SPEND_ATTEMPTED is in the enum but never
+  emitted, and the docs are updated to say so (issue 4).
+
+  On the hosted service the rejected row also carried nextRetryAt as the Go zero time (issue 6b);
+  that is recorded as a finding. merkleRegisteredAt is present on the loser on purpose: arcade
+  registers with merkle-service before the first broadcast (issue 6c, documented).
+
+  The second half submits two more conflicting spends back to back and only RECORDS which one the
+  network kept: both get 202, the network decides, and submit order is not a tiebreak (issue 5).
+requires: [regtest]
+roles:
+  A: teranode1
+  B: teranode2
+  C: teranode3
+steps:
+  - name: stop the auto-miner so nothing is mined mid-run
+    action: automine
+    with: { enabled: false }
+
+  - name: advance the tip two blocks, so each run funds itself from different coinbases
+    action: mine
+    with: { node: A, blocks: 2 }
+    assert:
+      - { check: same_tip, with: { nodes: [A, B, C] }, timeout: 180s }
+
+  - name: record the tip the funding heights are measured back from
+    action: set
+    with: { baseH: "${tip(A)}" }
+
+  - name: take the first funding coinbase, 101 deep
+    action: coinbase
+    with: { node: A, height: "${baseH - 101}" }
+    as: fund1
+
+  - name: take the second funding coinbase, 100 deep
+    action: coinbase
+    with: { node: A, height: "${baseH - 100}" }
+    as: fund2
+
+  - name: build two conflicting spends of the first coinbase (different fee, so different txids)
+    action: spend
+    with: { node: A, txid: "${fund1.txid}", vout: 0, key: miner, fee: 500 }
+    as: a
+
+  - name: the conflicting twin
+    action: spend
+    with: { node: A, txid: "${fund1.txid}", vout: 0, key: miner, fee: 600 }
+    as: b
+
+  - name: submit A and let the network accept it
+    action: submit
+    with: { target: arcade, tx: "${a}" }
+    as: subA
+    assert:
+      - { check: expr, with: { left: "${subA.accepted}", right: "true" } }
+      - check: arcade_tx
+        with: { txid: "${a.txid}", statusIn: [ACCEPTED_BY_NETWORK, SEEN_ON_NETWORK, SEEN_MULTIPLE_NODES] }
+        timeout: 60s
+
+  - name: submit the conflicting B
+    action: submit
+    with: { target: arcade, tx: "${b}" }
+    as: subB
+    assert:
+      - check: expr
+        with: { left: "${subB.accepted}", right: "true" }
+        message: arcade answers 202 to a submission it has not broadcast yet; the verdict comes later
+
+  - name: B loses - REJECTED with ARC 466 and A named as the competing transaction
+    action: wait_for
+    with: { check: arcade_tx, with: { txid: "${b.txid}", status: REJECTED }, timeout: 60s }
+    as: loser
+    assert:
+      - check: arcade_tx
+        with: { txid: "${b.txid}", status: REJECTED, statusCode: 466, competingTxsContains: "${a.txid}" }
+        timeout: 10s
+        message: the double-spend verdict is REJECTED 466 + competingTxs; DOUBLE_SPEND_ATTEMPTED is never emitted (report issue 4)
+      - check: arcade_tx
+        with: { txid: "${b.txid}", nextRetryAtAbsent: true }
+        timeout: 5s
+        should: true
+        message: a transaction with no retry scheduled should not report nextRetryAt as the zero time (report issue 6b)
+
+  - name: and A is unaffected
+    action: wait_for
+    with:
+      check: arcade_tx
+      with: { txid: "${a.txid}", statusIn: [ACCEPTED_BY_NETWORK, SEEN_ON_NETWORK, SEEN_MULTIPLE_NODES, MINED] }
+      timeout: 10s
+    as: winner
+
+  - name: ordering is not a tiebreak - two conflicting spends of the second coinbase
+    action: spend
+    with: { node: A, txid: "${fund2.txid}", vout: 0, key: miner, fee: 500 }
+    as: c
+
+  - name: the second twin
+    action: spend
+    with: { node: A, txid: "${fund2.txid}", vout: 0, key: miner, fee: 600 }
+    as: d
+
+  - name: submit C, then D immediately after
+    action: submit
+    with: { target: arcade, tx: "${c}" }
+    as: subC
+
+  - name: D
+    action: submit
+    with: { target: arcade, tx: "${d}" }
+    as: subD
+
+  - name: wait until C has a verdict
+    action: wait_for
+    with:
+      check: arcade_tx
+      with: { txid: "${c.txid}", statusIn: [REJECTED, ACCEPTED_BY_NETWORK, SEEN_ON_NETWORK, SEEN_MULTIPLE_NODES] }
+      timeout: 60s
+    as: cRes
+
+  - name: and D
+    action: wait_for
+    with:
+      check: arcade_tx
+      with: { txid: "${d.txid}", statusIn: [REJECTED, ACCEPTED_BY_NETWORK, SEEN_ON_NETWORK, SEEN_MULTIPLE_NODES] }
+      timeout: 60s
+    as: dRes
+
+  - name: record which one the network kept (report issue 5 - asynchronous by design, no assertion)
+    action: note
+    with: { message: "first-submitted: ${cRes} | second-submitted: ${dRes}" }
+
+  - name: restore the auto-miner
+    action: automine
+    with: { enabled: true }

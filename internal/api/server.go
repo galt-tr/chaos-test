@@ -50,8 +50,10 @@ type Deps struct {
 	Runtime   chaos.Runtime
 	Scenarios Scenarios
 	Logger    *slog.Logger
-	Arcade    string    // arcade base URL (POST /tx), may be empty
-	Diag      Diagnoser // nil disables /api/diagnostics
+	Arcade    string // arcade base URL (POST /tx), may be empty
+	// ArcadeEvents is arcade's events (SSE) listener base URL; "" disables sse_listen.
+	ArcadeEvents string
+	Diag         Diagnoser // nil disables /api/diagnostics
 	// Wallet is the go-wallet-toolbox sidecar handle; nil disables /api/wallet/*.
 	Wallet *walletsvc.Service
 	// ArcadeClient reads arcade's per-transaction status. nil disables the network-truth half
@@ -69,6 +71,9 @@ type Server struct {
 	d     Deps
 	mux   *http.ServeMux
 	netMu sync.Mutex
+	// sse holds the token-scoped arcade /events listeners scenarios open with sse_listen.
+	sseListenMu  sync.Mutex
+	sseListeners map[string]*arcade.SSEListener
 }
 
 // verifyAttachment polls the runtime until the container's attachment to network matches
@@ -166,6 +171,11 @@ func (s *Server) NewKey(name, note string) (*KeyEntry, error) { return s.d.Keys.
 func (s *Server) Logs(ctx context.Context, node string, opt chaos.LogOptions) (chaos.LogResult, error) {
 	n, err := s.node(node)
 	if err != nil {
+		// Not a node: a service with its own container (arcade, merkle-service, …) is a log
+		// source too, so a scenario can count what the broadcaster logged.
+		if svc, ok := s.d.Inventory.Services[node]; ok && svc.Container != "" {
+			return s.d.Runtime.Logs(ctx, svc.Container, opt)
+		}
 		return chaos.LogResult{}, err
 	}
 	return s.d.Runtime.Logs(ctx, n.Container, opt)
@@ -778,8 +788,30 @@ type SubmitResult struct {
 	Body     string `json:"body,omitempty"`
 }
 
-// Submit sends a transaction to one node (asset POST /tx) or to arcade (target "arcade").
-func (s *Server) Submit(ctx context.Context, target, txHex, efHex string) (*SubmitResult, error) {
+// SubmitOpts are the optional ARC subscription headers for an arcade submit. They are what a
+// wallet sets to be told about status changes, so a scenario checking the push surfaces (SSE,
+// webhooks) rather than GET /tx has to send them.
+type SubmitOpts struct {
+	CallbackToken     string `json:"callbackToken"`     // X-CallbackToken: scopes /events frames
+	CallbackURL       string `json:"callbackUrl"`       // X-CallbackUrl: webhook receiver
+	FullStatusUpdates bool   `json:"fullStatusUpdates"` // X-FullStatusUpdates: every transition, not just terminal
+}
+
+func (o SubmitOpts) apply(req *http.Request) {
+	if o.CallbackToken != "" {
+		req.Header.Set("X-CallbackToken", o.CallbackToken)
+	}
+	if o.CallbackURL != "" {
+		req.Header.Set("X-CallbackUrl", o.CallbackURL)
+	}
+	if o.FullStatusUpdates {
+		req.Header.Set("X-FullStatusUpdates", "true")
+	}
+}
+
+// Submit sends a transaction to one node (asset POST /tx) or to arcade (target "arcade"). opts
+// only apply to arcade.
+func (s *Server) Submit(ctx context.Context, target, txHex, efHex string, opts ...SubmitOpts) (*SubmitResult, error) {
 	if target == "arcade" {
 		if s.d.Arcade == "" {
 			return nil, errors.New("arcade URL not configured")
@@ -793,6 +825,9 @@ func (s *Server) Submit(ctx context.Context, target, txHex, efHex string) (*Subm
 			return nil, err
 		}
 		req.Header.Set("Content-Type", "text/plain")
+		for _, o := range opts {
+			o.apply(req)
+		}
 		resp, err := http.DefaultClient.Do(req)
 		if err != nil {
 			return nil, err

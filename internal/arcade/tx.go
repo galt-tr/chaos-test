@@ -61,6 +61,12 @@ type TxRecord struct {
 	ExtraInfo    string   `json:"extraInfo,omitempty"`
 	CompetingTxs []string `json:"competingTxs,omitempty"`
 	Timestamp    string   `json:"timestamp,omitempty"`
+	RetryCount   int      `json:"retryCount,omitempty"`
+	// NextRetryAt and MerkleRegisteredAt are kept as the raw strings arcade sent. A scenario
+	// asserting that a field is ABSENT needs to tell "not in the document" apart from the Go
+	// zero time serialised as "0001-01-01T00:00:00Z", which a time.Time would collapse.
+	NextRetryAt        string `json:"nextRetryAt,omitempty"`
+	MerkleRegisteredAt string `json:"merkleRegisteredAt,omitempty"`
 }
 
 // GetTx asks arcade what the network did with a transaction.

@@ -151,9 +151,10 @@ func run(ctx context.Context, lg *slog.Logger, invPath, keysPath, dataDir, liste
 		lg.Warn("no container runtime: chaos actions and container logs are off", "reason", r)
 	}
 
-	arcadeURL := ""
+	arcadeURL, arcadeEvents := "", ""
 	if s, ok := inv.Services["arcade"]; ok {
 		arcadeURL = s.URL
+		arcadeEvents = s.URLs["events"].URL
 	}
 	dg := diag.New(diag.Deps{Inv: inv, Fleet: fleet, Runtime: rt})
 
@@ -180,7 +181,7 @@ func run(ctx context.Context, lg *slog.Logger, invPath, keysPath, dataDir, liste
 		})
 	}
 	srv := api.New(api.Deps{Inventory: inv, Bus: bus, Fleet: fleet, AlertLog: alog, AlertHost: host, Signing: signing, Genesis: genesisPubs,
-		Keys: ring, Runtime: rt, Logger: lg, Arcade: arcadeURL, Diag: dg,
+		Keys: ring, Runtime: rt, Logger: lg, Arcade: arcadeURL, ArcadeEvents: arcadeEvents, Diag: dg,
 		Wallet: wsvc, ArcadeClient: arcadeCl, AutoMine: am, BaseCtx: ctx})
 	// The miner is the api server, which does not exist until now.
 	am.SetMiner(srv)
