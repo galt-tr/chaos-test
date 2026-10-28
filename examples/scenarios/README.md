@@ -117,7 +117,9 @@ what you reference later as `${name.field}`. `node:` fields accept a role or a n
 | `coinbase` | `node`, `height` (default 1) | `txid`, `hex`, `height`, `block` |
 | `newkey` | `name`, `note` | `name`, `address`, `lockingScript` |
 | `spend` | `node`, `txid`, `vout` (0), `key`, `to`, `toScript`, `satoshis` (0), `fee` (0), `outputs` (1), or `outs: [{script,to,satoshis}]` | `txid`, `hex`, `efHex`, `size` |
-| `submit` | `target` (a node, or `arcade`), and `hex`+`efHex` **or** `tx: {hex, efHex}` | `target`, `accepted`, `status`, `body`, `txid` |
+| `submit` | `target` (a node, or `arcade`), and `hex`+`efHex` **or** `tx: {hex, efHex}`; arcade only: `callbackToken`, `callbackUrl`, `fullStatusUpdates` (the `X-CallbackToken` / `X-CallbackUrl` / `X-FullStatusUpdates` headers) | `target`, `accepted`, `status`, `body`, `txid` |
+| `chain` | `node`, `txid`, `vout` (0), `key`, `depth` (10), `fee` (500), `target` (`arcade`, a node, or omitted = build only), plus the `submit` subscription fields | `txids[]`, `hops` (by index: `${c.hops.1}` is a `{txid, hex, efHex}` map `submit` takes as `tx:`), `first`, `last`, `depth`, `submitted`, `accepted`, `rejected[]`, `elapsedMs`. Each tx spends output 0 of the one before; submits go out back to back, never waiting. |
+| `sse_listen` | `token` | `token`, `connected`. Subscribes to arcade's `GET /events?callbackToken=` and records every frame for `sse_seen`. Returns once the subscription is registered. |
 | `build_alert` | `type` (e.g. `freeze`), `message`, `reason`, `blockHash`, `enforceAt`, `txHex`, `peer`, `note`, `funds: [{txid, vout, start, stop, policyExpires}]` | `sequence`, `hash`, `type`, `text` |
 | `push_alert` | `node`, `sequence` | `node`, `delivered` |
 | `rpc_freeze` | `node`, `txid`, `vout` (0), `start`, `stop`, `policyExpires` | `ok`. Teranode: admin freeze RPC. SV node: consensus blacklist. |
@@ -164,12 +166,16 @@ interval is ~0.75s. On a non-pass, `should: true` records a finding; otherwise t
 | `mempool_lacks` | `node`, `txid` | `txid` is not in node's mempool |
 | `event` | `kind`, `node`, `contains`, `pattern` (regexp), `since` (event id), `min` (default 1) | at least `min` matching bus events exist since `since` (default: this step's start) |
 | `no_event` | same filters + `max` (default 0) | waits the full window, then at most `max` matching events exist |
-| `log_count` | `node`, `pattern` (regexp) and/or `contains`, `since` (RFC3339, default step start), `min` (default 1) **or** `max` | with `min`: polls until ≥ `min` matching container-log lines. With `max`: waits the window, then ≤ `max`. |
+| `log_count` | `node` (a node, or a service with a container such as `arcade`), `pattern` (regexp) and/or `contains`, `since` (RFC3339, default step start), `min` (default 1) **or** `max` | with `min`: polls until ≥ `min` matching container-log lines. With `max`: waits the window, then ≤ `max`. |
 | `wallet_balance` | `atLeast` and/or `coinsAtLeast` | wallet balance / spendable-coin count meet the floors |
 | `wallet_tx_status` | `txid`, `wallet` (expected), `arcade` (expected) | the tx's wallet status and/or arcade status match (each checked only if given) |
 | `arcade_block_status` | `hash`, `status` | arcade's processing status for the block equals `status` |
 | `arcade_canonical` | `height`, `hash` | arcade's chaintracks has `hash` as the active-chain block at `height` |
-| `expr` | `left`, `right`, `op` (`==` default, `!=`, `contains`) | the string comparison holds (one-shot) |
+| `arcade_tx` | `txid`, then any of `status`, `statusIn` (list), `statusCode`, `extraInfoContains`, `extraInfoAbsent`, `nextRetryAtAbsent` (field missing), `nextRetryAtUnset` (missing or the zero time), `merkleRegisteredAtAbsent`, `competingTxsContains` | arcade's `GET /tx` record meets every expectation given; with none it passes and records the row as the detail (evidence) |
+| `arcade_txs` | `txids` (list, e.g. `"${c.txids}"`), `statusIn` (list) | every listed tx is at one of the statuses; the detail is a per-status census |
+| `arcade_policy` | `standardFormatSupported` (bool, optional) | arcade's `GET /policy` advertises the given value |
+| `sse_seen` | `token`, `txid`, `status` (optional) | the `sse_listen` for `token` was pushed a frame for `txid` at `status` (any frame when omitted) |
+| `expr` | `left`, `right`, `op` (`==` default, `!=`, `contains`, `not_contains`) | the string comparison holds (one-shot) |
 
 ### Events, `kind`, and the `mark`/`since` pattern
 

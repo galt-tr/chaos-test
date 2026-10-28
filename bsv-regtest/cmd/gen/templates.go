@@ -208,7 +208,7 @@ services:
 {{ end }}
   arcade:
     # ARC-compatible broadcaster (mode: all, pebble store, in-memory kafka). Profile: arcade.
-    image: ${ARCADE_IMAGE:-ghcr.io/bsv-blockchain/arcade:latest}
+    image: ${ARCADE_IMAGE:-ghcr.io/bsv-blockchain/broadcaster:latest}
     container_name: {{ .Project }}-arcade
     profiles: ["arcade"]
     networks:
@@ -532,6 +532,13 @@ kafka:
   consumer_group: arcade
   max_retries: 5
   buffer_size: 10000
+# Mirror the hosted topology (bsva-infra-flux arcade-v2): eight propagation partitions, so a
+# chain submitted one POST /tx at a time is spread over eight dependency-aware dispatchers
+# exactly as in production, and a 5 s reaper so a parked (PENDING_RETRY) transaction is
+# rebroadcast within a scenario's patience. The in-memory broker honours the partition count.
+propagation:
+  partitions: 8
+  reaper_interval_ms: 5000
 store:
   backend: pebble
   pebble:
@@ -571,8 +578,9 @@ callback:
 validator:
   accept_zero_fee: true
   min_fee_per_kb: 0
-  # accept standard-format txs too (arcade fetches the inputs' source data from the datahubs)
-  standard_format_supported: true
+  # standard_format_supported is deliberately left at arcade's default: the harness checks what
+  # /policy advertises against what intake does with a plain (non-EF) transaction, and arcade
+  # does NOT fetch the inputs' source data from anywhere (arcade-policy-plain-tx.yaml).
 bump_builder:
   grace_window_ms: 5000
   reconciler:

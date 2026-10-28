@@ -1,0 +1,82 @@
+id: arcade-chain-depth
+name: A 50-deep chain of unconfirmed transactions, one POST /tx each, reaches the network promptly
+description: >
+  Reproduces issue 2 of the hosted-service test report (28 Oct 2026). Fifty transactions, each
+  spending the single output of the one before, are submitted to arcade one POST /tx at a time
+  without waiting. On the hosted service hops 1-21 went through in seconds while hops 22-50 were
+  parked with TX_MISSING_PARENT after five propagation attempts and took minutes to recover.
+
+  Why it happens: a single-transaction submit is partition-keyed by its own txid, so on the
+  8-partition propagation topic (mirrored by bsv-regtest's arcade config) a child lands on a
+  different dependency-aware dispatcher than its parent, draws a missing-parent answer from the
+  datahub, and burns a flat 5 x 2 s retry budget before being parked for the reaper.
+
+  Expected outcome with the fix: every hop is at ACCEPTED_BY_NETWORK or beyond within the settle
+  window and nothing was parked. A slow chain is recorded as a finding with a per-status census.
+requires: [regtest]
+roles:
+  A: teranode1
+  B: teranode2
+  C: teranode3
+params:
+  depth: 50
+steps:
+  - name: stop the auto-miner so no block confirms part of the chain mid-run
+    action: automine
+    with: { enabled: false }
+
+  - name: advance the tip two blocks, so each run funds itself from a different coinbase
+    action: mine
+    with: { node: A, blocks: 2 }
+    assert:
+      - { check: same_tip, with: { nodes: [A, B, C] }, timeout: 180s }
+
+  - name: record the tip the funding height is measured back from
+    action: set
+    with: { baseH: "${tip(A)}" }
+
+  - name: take a funding coinbase 101 deep, comfortably past maturity
+    action: coinbase
+    with: { node: A, height: "${baseH - 101}" }
+    as: fund
+
+  - name: anchor for the arcade log window
+    action: mark
+    as: m0
+
+  - name: build the chain and submit every hop to arcade back to back
+    action: chain
+    with: { node: A, txid: "${fund.txid}", vout: 0, key: miner, depth: "${depth}", fee: 500, target: arcade }
+    as: c
+    timeout: 5m
+    assert:
+      - check: expr
+        with: { left: "${c.accepted}", right: "${depth}" }
+        message: every hop is a valid EF transaction, so arcade answers 202 to each
+      - check: arcade_txs
+        with: { txids: "${c.txids}", statusIn: [ACCEPTED_BY_NETWORK, SEEN_ON_NETWORK, SEEN_MULTIPLE_NODES, MINED] }
+        timeout: 90s
+        should: true
+        message: every hop should reach the network within 90 s without being parked (report issue 2)
+
+  - name: the per-status census after the window, for the record
+    action: wait_for
+    with:
+      check: arcade_txs
+      with: { txids: "${c.txids}", statusIn: [RECEIVED, PENDING_RETRY, ACCEPTED_BY_NETWORK, SEEN_ON_NETWORK, SEEN_MULTIPLE_NODES, MINED, REJECTED] }
+      timeout: 5s
+    as: census
+
+  - name: no hop was parked for the durable retry reaper
+    action: note
+    with: { message: "chain ${c.first} .. ${c.last}: ${c.accepted}/${c.submitted} accepted in ${c.elapsedMs} ms; census ${census}" }
+    assert:
+      - check: log_count
+        with: { node: arcade, pattern: "(?i)park(ed|ing)", since: "${m0.at}", max: 0 }
+        timeout: 5s
+        should: true
+        message: arcade should never have had to park a hop of a chain it received in order (report issue 2)
+
+  - name: restore the auto-miner
+    action: automine
+    with: { enabled: true }

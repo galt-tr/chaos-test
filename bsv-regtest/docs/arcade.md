@@ -38,9 +38,13 @@ transaction sent straight to a node returns `404 {"error":"transaction not found
 ## Status lifecycle
 
 ```
-RECEIVED → SENT_TO_NETWORK → ACCEPTED_BY_NETWORK → SEEN_ON_NETWORK → SEEN_MULTIPLE_NODES → MINED → IMMUTABLE
-                                                                    ↘ REJECTED · DOUBLE_SPEND_ATTEMPTED · PENDING_RETRY · STUMP_PROCESSING
+RECEIVED → ACCEPTED_BY_NETWORK → SEEN_ON_NETWORK → SEEN_MULTIPLE_NODES → MINED → IMMUTABLE
+                               ↘ REJECTED · PENDING_RETRY · STUMP_PROCESSING
 ```
+
+`SENT_TO_NETWORK` and `DOUBLE_SPEND_ATTEMPTED` are in arcade's enum but no code path emits them:
+a losing double spend is `REJECTED` with ARC code 466, `UTXO_SPENT` in `extraInfo` and the winner in
+`competingTxs` (`arcade-double-spend.yaml`).
 
 `MINED` is set when merkle-service delivers the proof (see below), not when a node mines the
 block, so it trails the block by a few seconds. `UNKNOWN` is the zero value. A transaction

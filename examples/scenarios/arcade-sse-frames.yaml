@@ -1,0 +1,71 @@
+id: arcade-sse-frames
+name: A token-scoped /events subscriber is told RECEIVED before ACCEPTED_BY_NETWORK
+description: >
+  Reproduces issue 6d of the hosted-service test report (28 Oct 2026). A subscriber opens
+  GET /events?callbackToken=<token>, then a transaction is submitted with X-CallbackToken set to
+  that token. On the hosted service the first frame was ACCEPTED_BY_NETWORK: intake never published
+  a RECEIVED event, and SENT_TO_NETWORK is set by no code path at all (it is retired from the docs
+  rather than emitted).
+
+  Expected outcome with the fix: the subscriber sees a RECEIVED frame and then the network verdict.
+  A missing RECEIVED frame is recorded as a finding; the full frame list is kept as evidence.
+requires: [regtest]
+roles:
+  A: teranode1
+  B: teranode2
+  C: teranode3
+params:
+  token: chaos-sse
+steps:
+  - name: stop the auto-miner
+    action: automine
+    with: { enabled: false }
+
+  - name: advance the tip two blocks, so each run funds itself from a different coinbase
+    action: mine
+    with: { node: A, blocks: 2 }
+    assert:
+      - { check: same_tip, with: { nodes: [A, B, C] }, timeout: 180s }
+
+  - name: record the tip the funding height is measured back from
+    action: set
+    with: { baseH: "${tip(A)}" }
+
+  - name: take a funding coinbase 101 deep, comfortably past maturity
+    action: coinbase
+    with: { node: A, height: "${baseH - 101}" }
+    as: fund
+
+  - name: subscribe to arcade's /events for the token BEFORE submitting anything
+    action: sse_listen
+    with: { token: "${token}" }
+
+  - name: build a spend
+    action: spend
+    with: { node: A, txid: "${fund.txid}", vout: 0, key: miner, fee: 500 }
+    as: t
+
+  - name: submit it under the token
+    action: submit
+    with: { target: arcade, tx: "${t}", callbackToken: "${token}" }
+    as: s
+    assert:
+      - { check: expr, with: { left: "${s.accepted}", right: "true" } }
+      - check: sse_seen
+        with: { token: "${token}", txid: "${t.txid}", status: ACCEPTED_BY_NETWORK }
+        timeout: 60s
+        message: the stream is live for this token, so the network verdict arrives as a frame
+      - check: sse_seen
+        with: { token: "${token}", txid: "${t.txid}", status: RECEIVED }
+        timeout: 5s
+        should: true
+        message: the first frame a subscriber sees should be RECEIVED, not ACCEPTED_BY_NETWORK (report issue 6d)
+
+  - name: every frame pushed for the transaction, for the record
+    action: wait_for
+    with: { check: sse_seen, with: { token: "${token}", txid: "${t.txid}" }, timeout: 5s }
+    as: frames
+
+  - name: restore the auto-miner
+    action: automine
+    with: { enabled: true }
